@@ -27,10 +27,11 @@
 - [x] Dispatch canonical messages
 - [x] Confirm delivery and record exposure
 - [x] Store inbound responses
+- [x] Track mechanical round execution and expected responses
+- [x] Support Round 1 broadcast as isolated per-Watcher messages
+- [x] Collect attributed Watcher responses
+- [x] Support personalized Round 2 messages
 - [ ] Support Coordinator routing
-- [ ] Support Round 1 broadcast as isolated per-Watcher messages
-- [ ] Collect attributed Watcher responses
-- [ ] Support personalized Round 2 messages
 - [ ] Support additional rounds
 - [ ] Support adding fresh Watchers during a debate
 

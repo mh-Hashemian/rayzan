@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/orchestrator.test.ts"
+    "test": "tsx --test tests/orchestrator.test.ts tests/round-workflow.test.ts"
   },
   "dependencies": {
     "@rayzan/protocol": "workspace:*",

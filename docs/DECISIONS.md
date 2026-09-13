@@ -253,3 +253,13 @@ Confirmed delivery causes Orchestrator to record an ExposureRecord. Accepted inb
 
 Reason:
 Protocol objects and transports were independent. A thin coordination layer is needed to store messages, confirm deliveries, and record exposure without putting those duties into transport or a future UI.
+
+## DEC-026 — Orchestrator tracks mechanical round execution only
+
+Status: Accepted
+
+Decision:
+`Round` remains a protocol object. `RoundWorkflow` in `@rayzan/orchestrator` tracks one running round: explicit participants, associated deliveries, and who has responded. Coordinator chooses participants and message content. Orchestrator does not discover Watchers by role, does not inspect bodies, and does not decide convergence. `progress.complete` means all expected responses arrived. That is not debate convergence. The next round is created only by an explicit later call, never automatically. One round may contain multiple canonical messages.
+
+Reason:
+Rayzan needs to know who is still waiting without taking semantic authority from the Coordinator.

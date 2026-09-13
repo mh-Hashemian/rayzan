@@ -18,7 +18,20 @@ rayzan/
 
 `packages/transport` (`@rayzan/transport`) depends on `@rayzan/protocol`. It delivers and receives messages. It does not decide debate semantics. It must not import `@rayzan/orchestrator`.
 
-`packages/orchestrator` (`@rayzan/orchestrator`) depends on protocol and transport. It is constructed with injected store and transport contracts. It stores canonical messages, asks transport to send and confirm them, records exposure after `delivered`, and stores accepted inbound responses. It does not decide when rounds begin or whether a debate has converged.
+`packages/orchestrator` (`@rayzan/orchestrator`) depends on protocol and transport. Low-level `Orchestrator` is constructed with injected store and transport contracts. It stores canonical messages, asks transport to send and confirm them, records exposure after `delivered`, and stores accepted inbound responses.
+
+`RoundWorkflow` tracks mechanical state for one round: who is expected to respond, which deliveries belong to the round, and whether those responses have arrived. Coordinator chooses participants and content. Orchestrator does not decide when another round is needed or whether the debate has converged. All-responses-received is not convergence. A new round is never created automatically.
+
+Protocol `Round` status is reused as:
+
+```text
+pending     — Round exists, execution has not started
+active      — startRound configured participants
+collecting  — at least one message has been dispatched
+completed   — completeRound closed the collection
+```
+
+`active` and `collecting` are kept distinct. One round execution may include several canonical messages (global Round 1 or personalized Round 2).
 
 The in-memory stores hold Agents, Debates, Rounds, MessageEnvelopes, and Exposure records. They are temporary memory, not persistence. They do not route messages, expand broadcasts, or advance debate state.
 

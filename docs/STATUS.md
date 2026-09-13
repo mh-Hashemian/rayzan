@@ -10,14 +10,15 @@ Completed:
 - `packages/protocol` domain model and in-memory stores
 - `@rayzan/transport` abstraction, ManualTransport, and delivery lifecycle
 - `@rayzan/orchestrator` dispatch, confirm-delivery/exposure, and response storage
+- Mechanical round execution (`RoundWorkflow`)
 
 Currently being worked on:
 
-- Nothing. Phase 2A orchestrator core is complete.
+- Nothing. Phase 2B round execution tracking is complete.
 
 Next:
 
-- Remaining debate workflow (routing, rounds, Watcher collection)
+- Remaining debate workflow (Coordinator routing, additional rounds, adding Watchers)
 - Not started
 
 Blockers:
