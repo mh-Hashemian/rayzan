@@ -12,9 +12,11 @@
 - [x] Define MessageEnvelope
 - [x] Define Debate and Round state
 - [x] Define Exposure Ledger model
-- [ ] Implement agent registry
-- [ ] Implement message store
-- [ ] Implement exposure ledger
+- [x] Implement agent registry
+- [x] Implement message store
+- [x] Implement debate store
+- [x] Implement round store
+- [x] Implement exposure ledger store
 - [ ] Implement ManualTransport
 
 ## Phase 2 — Debate Workflow

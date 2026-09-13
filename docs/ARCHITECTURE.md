@@ -12,7 +12,13 @@ rayzan/
 └── docs/
 ```
 
-`packages/protocol` defines portable debate types and invariants. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages.
+`packages/protocol` defines portable debate types, invariants, and in-memory stores. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages.
+
+The in-memory stores hold Agents, Debates, Rounds, MessageEnvelopes, and Exposure records. They are temporary memory, not persistence. They do not route messages, expand broadcasts, or advance debate state.
+
+Broadcast or group addressing is expanded into concrete `recipientIds` before a `MessageEnvelope` is stored.
+
+Application commands such as create debate, add watcher, or bind a browser tab are not `MessageEnvelope` objects.
 
 Applications under `apps/` are not created yet.
 

@@ -44,3 +44,20 @@ export {
   type RoundId,
 } from './ids.js';
 export { ProtocolError } from './validate.js';
+export {
+  InMemoryAgentRegistry,
+  type AgentRegistry,
+} from './stores/agent-registry.js';
+export {
+  InMemoryMessageStore,
+  type MessageStore,
+} from './stores/message-store.js';
+export {
+  InMemoryDebateStore,
+  type DebateStore,
+} from './stores/debate-store.js';
+export { InMemoryRoundStore, type RoundStore } from './stores/round-store.js';
+export {
+  InMemoryExposureLedgerStore,
+  type ExposureLedgerStore,
+} from './stores/exposure-store.js';

@@ -151,3 +151,43 @@ The first implementation package is `packages/protocol`. It holds shared protoco
 
 Reason:
 These types are shared debate concepts, not the orchestrator implementation. `core` is too generic and tends to become a catch-all. The orchestrator, extension, dashboard, and transports should all be able to depend on one portable protocol package.
+
+## DEC-016 — MessageKind remains a closed set
+
+Status: Accepted
+
+Decision:
+`MessageKind` stays the current closed set: `input`, `brief`, `query`, `response`, `fact`, `synthesis`. Do not accept arbitrary strings. Add a new kind only when Rayzan genuinely needs one. Routing must not depend heavily on semantic interpretation of `MessageKind`.
+
+Reason:
+These values are enough for the current protocol. A loose string field would hide new kinds instead of forcing a deliberate change.
+
+## DEC-017 — MessageEnvelope recipients are always concrete Agent IDs
+
+Status: Accepted
+
+Decision:
+Canonical `MessageEnvelope.recipientIds` always contains concrete Agent IDs. Do not support role or group targets such as `all-watchers` on the envelope. Broadcast or group addressing is expanded before the envelope becomes official.
+
+Reason:
+The exposure ledger must be able to state exactly which agents received a message.
+
+## DEC-018 — Every MessageEnvelope belongs to a Debate
+
+Status: Accepted
+
+Decision:
+Every `MessageEnvelope` requires a `debateId`. Operator intake creates a Debate with status `pending` first. There are no protocol messages outside a Debate.
+
+Reason:
+A floating message cannot be attributed, stored, or exposed against a debate. "Pre-debate intake" is the start of that pending Debate.
+
+## DEC-019 — Application commands are not debate messages
+
+Status: Accepted
+
+Decision:
+Operations such as create debate, add watcher, and bind browser tab are application/domain commands. They must not be modeled as `MessageEnvelope`.
+
+Reason:
+Debate messages carry attributed conversation content. Mixing control commands into that type would blur protocol state with application control.

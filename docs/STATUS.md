@@ -8,17 +8,16 @@ Completed:
 - Baseline dependencies
 - Initial project documentation
 - `packages/protocol` domain model (Agent, Debate, Round, MessageEnvelope, Exposure Ledger)
+- In-memory AgentRegistry, MessageStore, DebateStore, RoundStore, and ExposureLedgerStore
 
 Currently being worked on:
 
-- Nothing. Phase 1A protocol domain model is complete.
+- Nothing. Phase 1B in-memory stores are complete.
 
 Next:
 
-- Implement agent registry
-- Implement message store
-- Implement exposure ledger
 - Implement ManualTransport
+- Remaining Core Orchestrator work after stores (not started)
 
 Blockers:
 
