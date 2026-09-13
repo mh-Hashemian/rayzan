@@ -8,9 +8,10 @@
 
 ## Phase 1 — Core Orchestrator
 
-- [ ] Define Agent model
-- [ ] Define MessageEnvelope
-- [ ] Define Debate and Round state
+- [x] Define Agent model
+- [x] Define MessageEnvelope
+- [x] Define Debate and Round state
+- [x] Define Exposure Ledger model
 - [ ] Implement agent registry
 - [ ] Implement message store
 - [ ] Implement exposure ledger

@@ -141,3 +141,13 @@ The first browser MVP does not need to detect when a provider has finished gener
 
 Reason:
 Completion detection is provider-specific and error-prone. Operator-triggered capture is enough for the first bridge.
+
+## DEC-015 — First shared package is packages/protocol
+
+Status: Accepted
+
+Decision:
+The first implementation package is `packages/protocol`. It holds shared protocol and domain types. Do not use `packages/orchestrator` or `packages/core` for this layer. Later applications such as the orchestrator and browser extension will live under `apps/` and depend on this package.
+
+Reason:
+These types are shared debate concepts, not the orchestrator implementation. `core` is too generic and tends to become a catch-all. The orchestrator, extension, dashboard, and transports should all be able to depend on one portable protocol package.

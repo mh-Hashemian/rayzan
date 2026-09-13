@@ -2,7 +2,19 @@
 
 Rayzan is local-first. The Operator runs debates on a local machine. The Orchestrator is the software system that enforces protocol mechanics; it is not a remote service.
 
-No application packages exist yet. This repository is a pnpm TypeScript workspace. Implementation packages will be added under `packages/` when those phases begin.
+This repository is a pnpm TypeScript workspace.
+
+```text
+rayzan/
+├── packages/
+│   └── protocol/    # shared protocol/domain model
+├── apps/            # later: orchestrator, extension, ...
+└── docs/
+```
+
+`packages/protocol` defines portable debate types and invariants. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages.
+
+Applications under `apps/` are not created yet.
 
 ## Roles
 
@@ -73,3 +85,9 @@ There are two kinds of state:
 2. **Provider / ambient context** — provider conversations remain authoritative for provider-specific context such as memories, custom instructions, existing conversation history, and provider settings.
 
 The Orchestrator does not replace a provider's own conversation store. It records what Rayzan sent, received, routed, and exposed.
+
+The exposure ledger records protocol-visible exposure through Rayzan as structural references to messages. It does not claim to know provider memory, custom instructions, old thread history, system prompts, or model-internal state.
+
+A Debate tracks identity, topic, and status. Message history belongs in dedicated stores, not inside the Debate object.
+
+A Round is protocol state (`pending`, `active`, `collecting`, `completed`), not a provider conversation.
