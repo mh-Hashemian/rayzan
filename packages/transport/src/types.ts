@@ -8,7 +8,7 @@ import type {
 
 import type { DeliveryId } from './ids.js';
 
-export const DELIVERY_STATUSES = ['pending', 'responded'] as const;
+export const DELIVERY_STATUSES = ['pending', 'delivered', 'responded'] as const;
 
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
@@ -26,6 +26,10 @@ export type PendingManualDelivery = OutboundDelivery & {
   readonly status: 'pending';
 };
 
+export type DeliveredManualDelivery = OutboundDelivery & {
+  readonly status: 'delivered';
+};
+
 export interface InboundResponse {
   readonly deliveryId: DeliveryId;
   readonly outboundMessageId: MessageId;
@@ -34,4 +38,5 @@ export interface InboundResponse {
 
 export interface Transport {
   send(message: MessageEnvelope): readonly OutboundDelivery[];
+  markDelivered(deliveryId: string): OutboundDelivery;
 }

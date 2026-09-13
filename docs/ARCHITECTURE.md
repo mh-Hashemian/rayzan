@@ -66,7 +66,19 @@ Transport implementations are pluggable. Planned transports:
 - **Browser transport** — a browser extension acting as a generic bridge to provider websites.
 - **API transport** — later, for providers that expose a usable API.
 
-A transport sees a canonical `MessageEnvelope` and creates one outbound delivery per concrete recipient. Each delivery has its own delivery ID. A response is submitted against that ID and becomes an attributed `MessageEnvelope`. The original envelope is not mutated.
+A transport sees a canonical `MessageEnvelope` and creates one outbound delivery per concrete recipient. Each delivery has its own delivery ID. The original envelope is not mutated.
+
+Delivery lifecycle:
+
+```text
+pending → delivered → responded
+```
+
+`pending` means Rayzan queued the delivery. `delivered` means receipt was explicitly confirmed. `responded` means a correlated response was submitted. A response is not accepted from `pending`.
+
+Creating or queuing a delivery does not record exposure. Exposure is a protocol fact and is recorded only after `delivered`. Transport does not write the Exposure Ledger. The future orchestrator connects confirmed delivery to an ExposureRecord.
+
+A response is submitted against a delivery ID and becomes an attributed `MessageEnvelope`.
 
 Transports do not know what a round means, whether Watchers may see each other, or whether the debate should continue.
 

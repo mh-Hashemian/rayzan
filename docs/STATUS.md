@@ -10,14 +10,16 @@ Completed:
 - `packages/protocol` domain model (Agent, Debate, Round, MessageEnvelope, Exposure Ledger)
 - In-memory AgentRegistry, MessageStore, DebateStore, RoundStore, and ExposureLedgerStore
 - `@rayzan/transport` abstraction and in-memory ManualTransport
+- Delivery lifecycle: pending → delivered → responded
 
 Currently being worked on:
 
-- Nothing. Phase 1C transport abstraction and ManualTransport are complete.
+- Nothing. Phase 1D delivery lifecycle is complete.
 
 Next:
 
-- Remaining Core Orchestrator work after ManualTransport (not started)
+- Build the orchestrator that connects MessageStore, Transport, and Exposure Ledger
+- Not started
 
 Blockers:
 

@@ -55,7 +55,7 @@ function setupBrief() {
 }
 
 describe('ManualTransport', () => {
-  it('splits one canonical message into per-recipient pending deliveries', () => {
+  it('queues one pending delivery per recipient without implying exposure', () => {
     const { qwen, deepSeek, glm, brief } = setupBrief();
     const transport = new ManualTransport();
 
@@ -64,22 +64,17 @@ describe('ManualTransport', () => {
 
     assert.equal(deliveries.length, 3);
     assert.equal(pending.length, 3);
+    assert.ok(deliveries.every((delivery) => delivery.status === 'pending'));
     assert.deepEqual(
       pending.map((delivery) => delivery.recipientId).sort(),
       [deepSeek.id, glm.id, qwen.id].sort(),
     );
-    assert.equal(
-      new Set(pending.map((delivery) => delivery.messageId)).size,
-      1,
-    );
-    assert.equal(pending[0]?.messageId, brief.id);
     assert.equal(new Set(pending.map((delivery) => delivery.id)).size, 3);
-    assert.ok(pending.every((delivery) => delivery.status === 'pending'));
     assert.equal(transport.getMessage(brief.id), brief);
     assert.deepEqual(brief.recipientIds, [qwen.id, deepSeek.id, glm.id]);
   });
 
-  it('attributes responses by delivery ID and leaves other deliveries pending', () => {
+  it('moves deliveries pending → delivered → responded independently', () => {
     const { coordinator, qwen, deepSeek, glm, brief } = setupBrief();
     const transport = new ManualTransport();
     const deliveries = transport.send(brief);
@@ -98,45 +93,42 @@ describe('ManualTransport', () => {
     assert.ok(deepSeekDelivery);
     assert.ok(glmDelivery);
 
-    const qwenInbound = transport.submitResponse({
-      deliveryId: qwenDelivery.id,
-      responderId: qwen.id,
-      body: 'Qwen independent analysis',
-    });
+    transport.markDelivered(qwenDelivery.id);
+
+    assert.equal(transport.getDelivery(qwenDelivery.id)?.status, 'delivered');
+    assert.equal(transport.getDelivery(deepSeekDelivery.id)?.status, 'pending');
+    assert.equal(transport.getDelivery(glmDelivery.id)?.status, 'pending');
+
+    assert.throws(
+      () =>
+        transport.submitResponse({
+          deliveryId: deepSeekDelivery.id,
+          responderId: deepSeek.id,
+          body: 'DeepSeek cannot respond while pending',
+        }),
+      TransportError,
+    );
+
+    transport.markDelivered(deepSeekDelivery.id);
     const deepSeekInbound = transport.submitResponse({
       deliveryId: deepSeekDelivery.id,
       responderId: deepSeek.id,
       body: 'DeepSeek independent analysis',
     });
 
-    assert.equal(qwenInbound.message.senderId, qwen.id);
-    assert.deepEqual(qwenInbound.message.recipientIds, [coordinator.id]);
-    assert.equal(qwenInbound.deliveryId, qwenDelivery.id);
-    assert.equal(qwenInbound.outboundMessageId, brief.id);
-    assert.equal(qwenInbound.message.debateId, brief.debateId);
-    assert.equal(qwenInbound.message.kind, 'response');
-
     assert.equal(deepSeekInbound.message.senderId, deepSeek.id);
+    assert.deepEqual(deepSeekInbound.message.recipientIds, [coordinator.id]);
     assert.equal(deepSeekInbound.deliveryId, deepSeekDelivery.id);
-    assert.notEqual(qwenInbound.deliveryId, deepSeekInbound.deliveryId);
-
-    const pending = transport.listPending();
-    assert.equal(pending.length, 1);
-    assert.equal(pending[0]?.id, glmDelivery.id);
-    assert.equal(pending[0]?.recipientId, glm.id);
-
-    assert.throws(
-      () =>
-        transport.submitResponse({
-          deliveryId: qwenDelivery.id,
-          responderId: deepSeek.id,
-          body: 'This must not satisfy Qwen',
-        }),
-      TransportError,
+    assert.equal(deepSeekInbound.outboundMessageId, brief.id);
+    assert.equal(
+      transport.getDelivery(deepSeekDelivery.id)?.status,
+      'responded',
     );
+    assert.equal(transport.getDelivery(qwenDelivery.id)?.status, 'delivered');
+    assert.equal(transport.getDelivery(glmDelivery.id)?.status, 'pending');
   });
 
-  it('rejects unknown, wrong-agent, and duplicate submissions', () => {
+  it('rejects unknown, duplicate, premature, and misattributed actions', () => {
     const { qwen, deepSeek, brief } = setupBrief();
     const transport = new ManualTransport();
     const deliveries = transport.send(brief);
@@ -147,12 +139,32 @@ describe('ManualTransport', () => {
     assert.ok(qwenDelivery);
 
     assert.throws(
+      () => transport.markDelivered('missing-delivery'),
+      TransportError,
+    );
+    assert.throws(
       () =>
         transport.submitResponse({
           deliveryId: 'missing-delivery',
           responderId: qwen.id,
           body: 'hello',
         }),
+      TransportError,
+    );
+
+    assert.throws(
+      () =>
+        transport.submitResponse({
+          deliveryId: qwenDelivery.id,
+          responderId: qwen.id,
+          body: 'response before delivery',
+        }),
+      TransportError,
+    );
+
+    transport.markDelivered(qwenDelivery.id);
+    assert.throws(
+      () => transport.markDelivered(qwenDelivery.id),
       TransportError,
     );
 
@@ -179,6 +191,10 @@ describe('ManualTransport', () => {
           responderId: qwen.id,
           body: 'Second Qwen response',
         }),
+      TransportError,
+    );
+    assert.throws(
+      () => transport.markDelivered(qwenDelivery.id),
       TransportError,
     );
   });

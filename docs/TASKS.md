@@ -19,6 +19,7 @@
 - [x] Implement exposure ledger store
 - [x] Define transport abstraction
 - [x] Implement ManualTransport
+- [x] Distinguish pending, delivered, and responded delivery states
 
 ## Phase 2 — Debate Workflow
 

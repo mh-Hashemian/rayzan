@@ -221,3 +221,23 @@ Every per-recipient outbound delivery has a stable delivery/correlation ID. A su
 
 Reason:
 Structural correlation prevents misattribution, including one Watcher's response satisfying another Watcher's delivery.
+
+## DEC-023 — Delivery lifecycle is pending → delivered → responded
+
+Status: Accepted
+
+Decision:
+An outbound delivery moves `pending` → `delivered` → `responded`. `pending` means queued, not received. `delivered` means delivery was explicitly confirmed. `responded` means a valid correlated response was submitted. A response is accepted only from `delivered`. Duplicate delivery confirmation and `pending → responded` are rejected.
+
+Reason:
+Queued dispatch and actual receipt are different events. The same lifecycle will apply to browser and API transports even though confirmation works differently internally.
+
+## DEC-024 — Exposure means confirmed delivery, not queued dispatch
+
+Status: Accepted
+
+Decision:
+Creating or queuing an outbound delivery does not mean the recipient was exposed to the message. Exposure is recorded only after successful delivery confirmation. Transport does not write the Exposure Ledger. The future orchestrator connects `delivered` to an ExposureRecord.
+
+Reason:
+The ledger must stay truthful. A message waiting for the Operator to paste it has not been seen by the recipient.

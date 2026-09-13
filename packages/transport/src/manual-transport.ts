@@ -56,6 +56,32 @@ export class ManualTransport implements Transport {
     return this.#messages.get(id);
   }
 
+  markDelivered(deliveryId: string): OutboundDelivery {
+    const id = asDeliveryId(deliveryId);
+    const delivery = this.#deliveries.get(id);
+
+    if (delivery === undefined) {
+      throw new TransportError(`unknown delivery id: ${id}`);
+    }
+
+    if (delivery.status === 'delivered') {
+      throw new TransportError(`delivery already confirmed: ${id}`);
+    }
+
+    if (delivery.status === 'responded') {
+      throw new TransportError(
+        `cannot mark a responded delivery as delivered: ${id}`,
+      );
+    }
+
+    const confirmed = Object.freeze({
+      ...delivery,
+      status: 'delivered' as const,
+    });
+    this.#deliveries.set(id, confirmed);
+    return confirmed;
+  }
+
   submitResponse(input: {
     deliveryId: string;
     responderId: string;
@@ -67,6 +93,12 @@ export class ManualTransport implements Transport {
 
     if (delivery === undefined) {
       throw new TransportError(`unknown delivery id: ${deliveryId}`);
+    }
+
+    if (delivery.status === 'pending') {
+      throw new TransportError(
+        `cannot submit a response before delivery is confirmed: ${deliveryId}`,
+      );
     }
 
     if (delivery.status === 'responded') {
