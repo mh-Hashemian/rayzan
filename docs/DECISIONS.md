@@ -191,3 +191,33 @@ Operations such as create debate, add watcher, and bind browser tab are applicat
 
 Reason:
 Debate messages carry attributed conversation content. Mixing control commands into that type would blur protocol state with application control.
+
+## DEC-020 — Transports live in packages/transport
+
+Status: Accepted
+
+Decision:
+Transport code lives in `packages/transport` (`@rayzan/transport`). It may depend on `@rayzan/protocol`. `@rayzan/protocol` must not depend on transport.
+
+Reason:
+Protocol types and stores are delivery-independent. Browser, API, and manual transports should share one protocol model without pulling transport concerns into it.
+
+## DEC-021 — Transports deliver per recipient
+
+Status: Accepted
+
+Decision:
+A canonical `MessageEnvelope` may list multiple concrete recipients. Transport-level delivery records are one outbound delivery per recipient. The canonical envelope is not duplicated or mutated to accomplish this.
+
+Reason:
+Manual copy/paste, browser tabs, and API requests all happen per agent. The exposure ledger and response attribution also need a single recipient per delivery.
+
+## DEC-022 — Delivery IDs correlate outbound requests to responses
+
+Status: Accepted
+
+Decision:
+Every per-recipient outbound delivery has a stable delivery/correlation ID. A submitted response refers to that ID. Rayzan does not infer the responder, debate, or outbound request from response text.
+
+Reason:
+Structural correlation prevents misattribution, including one Watcher's response satisfying another Watcher's delivery.

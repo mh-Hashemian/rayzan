@@ -7,12 +7,15 @@ This repository is a pnpm TypeScript workspace.
 ```text
 rayzan/
 ├── packages/
-│   └── protocol/    # shared protocol/domain model
-├── apps/            # later: orchestrator, extension, ...
+│   ├── protocol/     # shared protocol/domain model
+│   └── transport/    # delivery abstraction and ManualTransport
+├── apps/             # later: orchestrator, extension, ...
 └── docs/
 ```
 
-`packages/protocol` defines portable debate types, invariants, and in-memory stores. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages.
+`packages/protocol` defines portable debate types, invariants, and in-memory stores. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages. It must not import `@rayzan/transport`.
+
+`packages/transport` (`@rayzan/transport`) depends on `@rayzan/protocol`. It delivers and receives messages. It does not decide debate semantics.
 
 The in-memory stores hold Agents, Debates, Rounds, MessageEnvelopes, and Exposure records. They are temporary memory, not persistence. They do not route messages, expand broadcasts, or advance debate state.
 
@@ -59,9 +62,13 @@ Applications under `apps/` are not created yet.
 
 Transport implementations are pluggable. Planned transports:
 
-- **Manual transport** — permanent fallback. The Operator copies and pastes messages.
+- **Manual transport** — permanent fallback. The Operator copies and pastes messages. This remains available even if every browser or API integration is broken.
 - **Browser transport** — a browser extension acting as a generic bridge to provider websites.
 - **API transport** — later, for providers that expose a usable API.
+
+A transport sees a canonical `MessageEnvelope` and creates one outbound delivery per concrete recipient. Each delivery has its own delivery ID. A response is submitted against that ID and becomes an attributed `MessageEnvelope`. The original envelope is not mutated.
+
+Transports do not know what a round means, whether Watchers may see each other, or whether the debate should continue.
 
 Browser automation is not the core architecture. The Orchestrator remains authoritative regardless of how a message is delivered.
 

@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "pnpm --filter @rayzan/protocol test"
+    "test": "pnpm --filter @rayzan/protocol --filter @rayzan/transport test"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

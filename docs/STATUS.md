@@ -9,15 +9,15 @@ Completed:
 - Initial project documentation
 - `packages/protocol` domain model (Agent, Debate, Round, MessageEnvelope, Exposure Ledger)
 - In-memory AgentRegistry, MessageStore, DebateStore, RoundStore, and ExposureLedgerStore
+- `@rayzan/transport` abstraction and in-memory ManualTransport
 
 Currently being worked on:
 
-- Nothing. Phase 1B in-memory stores are complete.
+- Nothing. Phase 1C transport abstraction and ManualTransport are complete.
 
 Next:
 
-- Implement ManualTransport
-- Remaining Core Orchestrator work after stores (not started)
+- Remaining Core Orchestrator work after ManualTransport (not started)
 
 Blockers:
 

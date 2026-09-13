@@ -17,7 +17,8 @@
 - [x] Implement debate store
 - [x] Implement round store
 - [x] Implement exposure ledger store
-- [ ] Implement ManualTransport
+- [x] Define transport abstraction
+- [x] Implement ManualTransport
 
 ## Phase 2 — Debate Workflow
 
