@@ -23,6 +23,10 @@
 
 ## Phase 2 — Debate Workflow
 
+- [x] Connect protocol stores to transport via Orchestrator
+- [x] Dispatch canonical messages
+- [x] Confirm delivery and record exposure
+- [x] Store inbound responses
 - [ ] Support Coordinator routing
 - [ ] Support Round 1 broadcast as isolated per-Watcher messages
 - [ ] Collect attributed Watcher responses

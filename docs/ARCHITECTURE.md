@@ -7,15 +7,18 @@ This repository is a pnpm TypeScript workspace.
 ```text
 rayzan/
 ├── packages/
-│   ├── protocol/     # shared protocol/domain model
-│   └── transport/    # delivery abstraction and ManualTransport
-├── apps/             # later: orchestrator, extension, ...
+│   ├── protocol/        # shared protocol/domain model
+│   ├── transport/       # delivery abstraction and ManualTransport
+│   └── orchestrator/    # connects protocol stores to transports
+├── apps/                # later: dashboard, extension, ...
 └── docs/
 ```
 
-`packages/protocol` defines portable debate types, invariants, and in-memory stores. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages. It must not import `@rayzan/transport`.
+`packages/protocol` defines portable debate types, invariants, and in-memory stores. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages. It must not import `@rayzan/transport` or `@rayzan/orchestrator`.
 
-`packages/transport` (`@rayzan/transport`) depends on `@rayzan/protocol`. It delivers and receives messages. It does not decide debate semantics.
+`packages/transport` (`@rayzan/transport`) depends on `@rayzan/protocol`. It delivers and receives messages. It does not decide debate semantics. It must not import `@rayzan/orchestrator`.
+
+`packages/orchestrator` (`@rayzan/orchestrator`) depends on protocol and transport. It is constructed with injected store and transport contracts. It stores canonical messages, asks transport to send and confirm them, records exposure after `delivered`, and stores accepted inbound responses. It does not decide when rounds begin or whether a debate has converged.
 
 The in-memory stores hold Agents, Debates, Rounds, MessageEnvelopes, and Exposure records. They are temporary memory, not persistence. They do not route messages, expand broadcasts, or advance debate state.
 
@@ -76,7 +79,9 @@ pending → delivered → responded
 
 `pending` means Rayzan queued the delivery. `delivered` means receipt was explicitly confirmed. `responded` means a correlated response was submitted. A response is not accepted from `pending`.
 
-Creating or queuing a delivery does not record exposure. Exposure is a protocol fact and is recorded only after `delivered`. Transport does not write the Exposure Ledger. The future orchestrator connects confirmed delivery to an ExposureRecord.
+Creating or queuing a delivery does not record exposure. Exposure is a protocol fact and is recorded only after `delivered`. Transport does not write the Exposure Ledger. Orchestrator records an ExposureRecord after Transport successfully marks a delivery `delivered`.
+
+There is no transaction across those two steps. If exposure recording failed after `markDelivered` succeeded, the delivery would be `delivered` without an exposure row. Phase 2A does not roll that back. In-memory stores should not fail after validated input except on a duplicate exposure id.
 
 A response is submitted against a delivery ID and becomes an attributed `MessageEnvelope`.
 

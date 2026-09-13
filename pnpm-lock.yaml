@@ -30,6 +30,19 @@ importers:
         specifier: ^8.70.0
         version: 8.70.0(eslint@10.10.0)(typescript@5.9.3)
 
+  packages/orchestrator:
+    dependencies:
+      '@rayzan/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@rayzan/transport':
+        specifier: workspace:*
+        version: link:../transport
+    devDependencies:
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+
   packages/protocol:
     devDependencies:
       tsx:

@@ -8,5 +8,6 @@ export {
   type InboundResponse,
   type OutboundDelivery,
   type PendingManualDelivery,
+  type SubmitResponseInput,
   type Transport,
 } from './types.js';

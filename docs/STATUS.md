@@ -1,24 +1,23 @@
 # Status
 
-Current phase: Phase 1 — Core Orchestrator
+Current phase: Phase 2 — Debate Workflow
 
 Completed:
 
 - Initial workspace setup
 - Baseline dependencies
 - Initial project documentation
-- `packages/protocol` domain model (Agent, Debate, Round, MessageEnvelope, Exposure Ledger)
-- In-memory AgentRegistry, MessageStore, DebateStore, RoundStore, and ExposureLedgerStore
-- `@rayzan/transport` abstraction and in-memory ManualTransport
-- Delivery lifecycle: pending → delivered → responded
+- `packages/protocol` domain model and in-memory stores
+- `@rayzan/transport` abstraction, ManualTransport, and delivery lifecycle
+- `@rayzan/orchestrator` dispatch, confirm-delivery/exposure, and response storage
 
 Currently being worked on:
 
-- Nothing. Phase 1D delivery lifecycle is complete.
+- Nothing. Phase 2A orchestrator core is complete.
 
 Next:
 
-- Build the orchestrator that connects MessageStore, Transport, and Exposure Ledger
+- Remaining debate workflow (routing, rounds, Watcher collection)
 - Not started
 
 Blockers:

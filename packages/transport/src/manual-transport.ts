@@ -10,6 +10,7 @@ import type {
   InboundResponse,
   OutboundDelivery,
   PendingManualDelivery,
+  SubmitResponseInput,
   Transport,
 } from './types.js';
 
@@ -82,12 +83,7 @@ export class ManualTransport implements Transport {
     return confirmed;
   }
 
-  submitResponse(input: {
-    deliveryId: string;
-    responderId: string;
-    body: string;
-    messageId?: string;
-  }): InboundResponse {
+  submitResponse(input: SubmitResponseInput): InboundResponse {
     const deliveryId = asDeliveryId(input.deliveryId);
     const delivery = this.#deliveries.get(deliveryId);
 

@@ -241,3 +241,15 @@ Creating or queuing an outbound delivery does not mean the recipient was exposed
 
 Reason:
 The ledger must stay truthful. A message waiting for the Operator to paste it has not been seen by the recipient.
+
+## DEC-025 — Orchestrator connects protocol state to transports
+
+Status: Accepted
+
+Decision:
+`@rayzan/orchestrator` is the coordination layer. It may depend on `@rayzan/protocol` and `@rayzan/transport`. Protocol and transport must not depend on orchestrator. Orchestrator is constructed with injected `MessageStore`, `ExposureLedgerStore`, and `Transport` contracts. It does not instantiate concrete stores.
+
+Confirmed delivery causes Orchestrator to record an ExposureRecord. Accepted inbound responses are stored as canonical MessageEnvelopes. Transport owns delivery and correlation validation. Orchestrator owns coordination between subsystems. It does not decide debate semantics.
+
+Reason:
+Protocol objects and transports were independent. A thin coordination layer is needed to store messages, confirm deliveries, and record exposure without putting those duties into transport or a future UI.

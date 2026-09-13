@@ -36,7 +36,15 @@ export interface InboundResponse {
   readonly message: MessageEnvelope;
 }
 
+export interface SubmitResponseInput {
+  deliveryId: string;
+  responderId: string;
+  body: string;
+  messageId?: string;
+}
+
 export interface Transport {
   send(message: MessageEnvelope): readonly OutboundDelivery[];
   markDelivered(deliveryId: string): OutboundDelivery;
+  submitResponse(input: SubmitResponseInput): InboundResponse;
 }
