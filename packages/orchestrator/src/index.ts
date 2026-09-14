@@ -26,6 +26,18 @@ export {
   type FinalizeDebateCommand,
 } from './coordinator-command.js';
 export { parseCoordinatorCommandBatch } from './coordinator-command-parser.js';
+export { CoordinatorCommandExecutor } from './coordinator-command-executor.js';
+export {
+  createCoordinatorExecutionContext,
+  type CoordinatorExecutionContext,
+} from './coordinator-execution-context.js';
+export type {
+  CompleteRoundExecutionResult,
+  CoordinatorCommandExecutionResult,
+  CoordinatorExecutionResult,
+  DispatchExecutionResult,
+  FinalizeDebateExecutionResult,
+} from './coordinator-execution-result.js';
 export {
   RoundWorkflow,
   type ParticipantProgress,

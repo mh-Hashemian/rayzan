@@ -40,7 +40,7 @@ Rayzan is not the intelligence that conducts a debate. Coordinator, Watchers, an
 
 `coordinator` is an Agent role, not a provider and not a Rayzan-built reasoning engine. The same AI provider may host different Rayzan agents and roles at once (for example a DeepSeek Coordinator conversation and a DeepSeek Reviewer Watcher). Role, provider, transport, and browser conversation are independent. Protocol and routing code must not infer role from provider, and must not carry `browserTabId`, `providerName`, `conversationUrl`, or DOM selectors on `Agent`, `MessageEnvelope`, `DispatchPlan`, `DispatchIntent`, `Round`, or `Debate`.
 
-Future Coordinator commands are a structured interface between that external chatbot and Rayzan. Phase 2E parses those commands. It does not execute them. `start-round` is intentionally deferred until round-creation semantics are designed.
+Future Coordinator commands are a structured interface between that external chatbot and Rayzan. `start-round` is intentionally deferred until round-creation semantics are designed.
 
 ```text
 Coordinator Agent
@@ -51,14 +51,22 @@ CoordinatorCommandParser
     ↓
 CoordinatorCommandBatch
     ↓
-future CommandExecutor
+CoordinatorCommandExecutor
     ↓
-DispatchPlan / RoundWorkflow / etc.
+DispatchPlan / RoundWorkflow / Orchestrator / DebateStore
 ```
 
 A Coordinator response is raw text. A `CoordinatorCommand` is a validated mechanical instruction. Rayzan does not infer actions from prose. v1 requires the entire response to be JSON; wrapped or mixed prose is rejected. Coordinator output is untrusted: it never goes through `eval`, dynamic method dispatch, or arbitrary tool execution. The command vocabulary is a closed union (`dispatch`, `complete-round`, `finalize-debate`) and is the same for every Coordinator provider.
 
-`dispatch` omits `senderId`. The future executor binds the sender from the inbound Coordinator message so a command cannot impersonate another Agent through JSON.
+`dispatch` omits `senderId`. The executor binds the sender from trusted execution context (`InboundResponse.senderId` / Coordinator Agent ID, plus the inbound `debateId`). Command JSON cannot impersonate another Agent.
+
+Command batches are ordered and fail-fast. They are not transactional in v1: an earlier command may have already taken effect when a later command fails. Cheap whole-batch checks run first: trusted Coordinator identity, debate scope, and `finalize-debate` placement (`finalize-debate` at most once, and only last).
+
+Round-bound `dispatch` goes through `RoundWorkflow.dispatchPlan`. A dispatch without `roundId` goes through `DispatchPlanner` and `Orchestrator.dispatch` so Coordinator → Coder handoff is not forced into a Watcher round.
+
+`complete-round` closes mechanical collection for that round. It is not debate convergence.
+
+`finalize-debate` may run only when the Debate is `active` and every existing Round record is `completed`. It then sets Debate status to `completed`. The synthesis `body` is returned on the execution result. Durable synthesis persistence is deferred. No next round is created.
 
 Addressing is expanded before a canonical message exists:
 

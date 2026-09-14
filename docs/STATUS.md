@@ -14,14 +14,14 @@ Completed:
 - `DispatchIntent` exposure metadata declared at dispatch
 - Recipient routing via `DispatchPlan` / `DispatchPlanner`
 - Coordinator command protocol parser (`dispatch`, `complete-round`, `finalize-debate`)
+- Coordinator command execution against existing orchestration
 
 Currently being worked on:
 
-- Nothing. Phase 2E command parsing is complete.
+- Nothing. Phase 2F command execution is complete.
 
 Next:
 
-- Coordinator command execution
 - Remaining debate workflow (`start-round` deferred, additional rounds, adding Watchers)
 - Coordinator connectivity and browser/API transports are not started
 

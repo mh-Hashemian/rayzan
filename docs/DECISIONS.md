@@ -323,3 +323,43 @@ DeepSeek, ChatGPT, Qwen, GLM, tests, and future API Coordinators use the same co
 
 Reason:
 Role, provider, and transport stay independent. Command meaning belongs to Rayzan, not to a vendor-specific formatter.
+
+## DEC-033 — Trusted Coordinator identity comes from transport/message context
+
+Status: Accepted
+
+Decision:
+Coordinator command JSON must not contain `senderId`. `CoordinatorCommandExecutor` receives a trusted `CoordinatorExecutionContext` whose `coordinatorId` and `debateId` come from the inbound Coordinator message, not from parsed commands. The Agent must exist and have `role: 'coordinator'`. Provider names are never inspected. Every command in the batch must target that trusted Debate; a mismatch rejects the whole batch before side effects.
+
+Reason:
+A Coordinator chatbot must not impersonate another Agent or mutate another Debate by emitting JSON.
+
+## DEC-034 — Coordinator command execution is ordered, fail-fast, and non-transactional
+
+Status: Accepted
+
+Decision:
+Commands execute in array order. If one command fails, later commands are not run. Earlier successful commands are not rolled back. v1 has no transaction or undo infrastructure. Whole-batch preflight covers trusted sender, debate scope, and `finalize-debate` placement before any mutation.
+
+Reason:
+Ordered mechanical execution is enough to connect the parser to existing orchestration. Transactions would be a new subsystem.
+
+## DEC-035 — finalize-debate closes a Debate only after existing rounds are completed
+
+Status: Accepted
+
+Decision:
+`finalize-debate` is not convergence analysis. It requires Debate status `active` and every existing Round record for that Debate to be `completed`, then sets Debate status to `completed`. `finalize-debate` may appear at most once and must be last in the batch. `complete-round` still means close this collection round. No next round is created automatically.
+
+Reason:
+A completed Debate with an open round would be an inconsistent protocol state. Round creation remains a later command design.
+
+## DEC-036 — Final synthesis is returned by execution; durable persistence is deferred
+
+Status: Accepted
+
+Decision:
+`finalize-debate.body` is the Coordinator's synthesis for Rayzan/Operator. Phase 2F returns it on the execution result. It is not stored as a `MessageEnvelope` and there is no `DebateResultStore` yet. Callers/dashboard later decide display and persistence.
+
+Reason:
+A synthesis has no concrete protocol recipients yet. Forcing it into `MessageEnvelope` would invent a fake Operator message.
