@@ -12,15 +12,16 @@ Completed:
 - `@rayzan/orchestrator` dispatch, confirm-delivery/exposure, and response storage
 - Mechanical round execution (`RoundWorkflow`)
 - `DispatchIntent` exposure metadata declared at dispatch
+- Recipient routing via `DispatchPlan` / `DispatchPlanner`
 
 Currently being worked on:
 
-- Nothing. Phase 2C dispatch intent is complete.
+- Nothing. Phase 2D recipient routing is complete.
 
 Next:
 
-- Remaining debate workflow (Coordinator routing, additional rounds, adding Watchers)
-- Not started
+- Remaining debate workflow (additional rounds, adding Watchers)
+- Coordinator connectivity, command parsing, and browser/API transports are not started
 
 Blockers:
 

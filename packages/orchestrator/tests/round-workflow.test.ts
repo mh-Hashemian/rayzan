@@ -15,6 +15,7 @@ import {
 import { ManualTransport } from '@rayzan/transport';
 
 import { createDispatchIntent } from '../src/dispatch-intent.js';
+import { createDispatchPlan } from '../src/dispatch-plan.js';
 import { OrchestratorError } from '../src/error.js';
 import { Orchestrator } from '../src/orchestrator.js';
 import { RoundWorkflow } from '../src/round-workflow.js';
@@ -569,6 +570,59 @@ describe('RoundWorkflow', () => {
     assert.deepEqual(
       exposures.listByAgentInRound(glm.id, round2.id)[0]?.referencedMessageIds,
       [qwenResponse.id, deepSeekResponse.id],
+    );
+  });
+
+  it('expands a Coordinator round-watchers plan into the round participants', () => {
+    const {
+      workflow,
+      coordinator,
+      qwen,
+      deepSeek,
+      glm,
+      coder,
+      debate,
+      round1,
+    } = setup();
+
+    workflow.startRound({
+      roundId: round1.id,
+      participantIds: [qwen.id, deepSeek.id, glm.id],
+    });
+
+    const deliveries = workflow.dispatchPlan(
+      round1.id,
+      createDispatchPlan({
+        messageId: 'msg-brief-r1',
+        debateId: debate.id,
+        senderId: coordinator.id,
+        recipients: { type: 'round-watchers' },
+        kind: 'brief',
+        body: 'GLOBAL ROUND 1 MESSAGE',
+        referencedMessageIds: [],
+      }),
+    );
+
+    assert.equal(deliveries.length, 3);
+    assert.deepEqual(
+      deliveries.map((delivery) => delivery.recipientId),
+      [qwen.id, deepSeek.id, glm.id],
+    );
+    assert.equal(workflow.getRoundProgress(round1.id).status, 'collecting');
+
+    const coderPlan = createDispatchPlan({
+      messageId: 'msg-coder-from-round',
+      debateId: debate.id,
+      roundId: round1.id,
+      senderId: coordinator.id,
+      recipients: { type: 'explicit-agents', agentIds: [coder.id] },
+      kind: 'brief',
+      body: 'Coder is not in this round',
+      referencedMessageIds: [],
+    });
+    assert.throws(
+      () => workflow.dispatchPlan(round1.id, coderPlan),
+      OrchestratorError,
     );
   });
 });

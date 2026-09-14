@@ -16,6 +16,8 @@ import type {
 } from '@rayzan/transport';
 
 import type { DispatchIntent } from './dispatch-intent.js';
+import type { DispatchPlan } from './dispatch-plan.js';
+import { DispatchPlanner } from './dispatch-planner.js';
 import { OrchestratorError } from './error.js';
 import type { Orchestrator } from './orchestrator.js';
 
@@ -53,13 +55,16 @@ type RoundExecution = {
 
 export class RoundWorkflow {
   readonly #executions = new Map<string, RoundExecution>();
+  readonly #planner: DispatchPlanner;
 
   constructor(
     private readonly orchestrator: Orchestrator,
     private readonly agents: AgentRegistry,
     private readonly debates: DebateStore,
     private readonly rounds: RoundStore,
-  ) {}
+  ) {
+    this.#planner = new DispatchPlanner(agents);
+  }
 
   startRound(input: {
     roundId: string;
@@ -110,6 +115,43 @@ export class RoundWorkflow {
     });
 
     this.#setRoundStatus(roundId, 'active');
+  }
+
+  getParticipantIds(roundId: string): readonly AgentId[] {
+    return this.#requireExecution(roundId).participantIds;
+  }
+
+  dispatchPlan(
+    roundId: string,
+    plan: DispatchPlan,
+  ): readonly OutboundDelivery[] {
+    const execution = this.#requireOpenExecution(roundId);
+
+    if (plan.debateId !== execution.debateId) {
+      throw new OrchestratorError(
+        `plan debate ${plan.debateId} does not match round debate ${execution.debateId}`,
+      );
+    }
+
+    if (plan.roundId !== undefined && plan.roundId !== roundId) {
+      throw new OrchestratorError(
+        `plan round ${plan.roundId} does not match ${roundId}`,
+      );
+    }
+
+    const resolvedPlan =
+      plan.roundId === undefined
+        ? Object.freeze({
+            ...plan,
+            roundId: asRoundId(roundId),
+          })
+        : plan;
+
+    const intent = this.#planner.plan(resolvedPlan, {
+      participantIds: execution.participantIds,
+    });
+
+    return this.dispatch(roundId, intent);
   }
 
   dispatch(

@@ -20,11 +20,55 @@ rayzan/
 
 `packages/orchestrator` (`@rayzan/orchestrator`) depends on protocol and transport. Low-level `Orchestrator` is constructed with injected store and transport contracts. It stores canonical messages, asks transport to send and confirm them, records exposure after `delivered`, and stores accepted inbound responses.
 
-Dispatch is expressed as `DispatchIntent`: a `MessageEnvelope` plus `referencedMessageIds`. Those IDs are structural declarations from Coordinator, not a result of reading message text.
+Rayzan is not the intelligence that conducts a debate. Coordinator, Watchers, and Coder are external agents connected through transports. Rayzan only manages protocol state, routing, deliveries, exposure, correlation, and workflow bookkeeping.
 
 ```text
+               external AI agents
+
+        ┌────────────┬────────────┐
+        │            │            │
+        ▼            ▼            ▼
+ Coordinator       Watchers      Coder
+   chatbot         chatbots    coding agent
+        │            │            │
+        └────────────┼────────────┘
+                     │
+                     ▼
+                   Rayzan
+             mechanical control
+```
+
+`coordinator` is an Agent role, not a provider and not a Rayzan-built reasoning engine. The same AI provider may host different Rayzan agents and roles at once (for example a DeepSeek Coordinator conversation and a DeepSeek Reviewer Watcher). Role, provider, transport, and browser conversation are independent. Protocol and routing code must not infer role from provider, and must not carry `browserTabId`, `providerName`, `conversationUrl`, or DOM selectors on `Agent`, `MessageEnvelope`, `DispatchPlan`, `DispatchIntent`, `Round`, or `Debate`.
+
+Future Coordinator commands are a structured interface between that external chatbot and Rayzan. They are not implemented yet.
+
+Addressing is expanded before a canonical message exists:
+
+```text
+DispatchPlan
+        ↓
+DispatchPlanner
+        ↓
+DispatchIntent
+        ↓
+RoundWorkflow / Orchestrator
+```
+
+`DispatchPlan` names a sender and a `RecipientSelector`. `DispatchPlanner` resolves that selector into concrete `recipientIds` and produces a `DispatchIntent`. The planner is mechanical and provider-agnostic. It does not care whether the plan came from DeepSeek, ChatGPT, Qwen, Claude, a test, or a future API integration.
+
+Supported selectors:
+
+- `round-watchers` — Watcher participants of the named round, not every agent with role `watcher`
+- `explicit-agents` — the listed Agent IDs
+
+A Coordinator agent may be the sender of a `round-watchers` plan; that selector requires the sender to exist and to have role `coordinator`. The same planner can also resolve Operator → Coordinator and Coordinator → Coder using `explicit-agents`. It does not require every plan to come from a Coordinator.
+
+Dispatch is then expressed as `DispatchIntent`: a `MessageEnvelope` plus `referencedMessageIds`. Those IDs are structural declarations from Coordinator, not a result of reading message text.
+
+```text
+DispatchPlan      — sender + recipient selector + message fields
+DispatchIntent    — concrete message + intended structural exposure metadata
 MessageEnvelope   — the protocol message itself
-DispatchIntent    — message + intended structural exposure metadata
 ExposureRecord    — what was actually exposed after confirmed delivery
 ```
 
@@ -53,17 +97,17 @@ Applications under `apps/` are not created yet.
 
 ## Roles
 
-| Role         | Kind     | Responsibility                                                                                                             |
-| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Operator     | Human    | Final authority. Introduces the problem, may override any recommendation, and approves implementation.                     |
-| Coordinator  | Agent    | Owns complete debate context, semantic reasoning, debate rounds, synthesis, and convergence decisions. Does not implement. |
-| Watchers     | Agents   | Independent reasoning agents. Analyze, challenge, and recommend. Do not implement.                                         |
-| Coder        | Agent    | Codebase authority and the only implementation agent.                                                                      |
-| Orchestrator | Software | Mechanical protocol concerns: identity, routing, round state, delivery, attribution, exposure, and history.                |
+| Role         | Kind           | Responsibility                                                                                                                                                                               |
+| ------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operator     | Human          | Final authority. Introduces the problem, may override any recommendation, and approves implementation.                                                                                       |
+| Coordinator  | External agent | Connected chatbot that owns complete debate context, semantic reasoning, debate rounds, synthesis, and convergence decisions. Does not implement. Rayzan does not contain this intelligence. |
+| Watchers     | Agents         | Independent reasoning agents. Analyze, challenge, and recommend. Do not implement.                                                                                                           |
+| Coder        | Agent          | Codebase authority and the only implementation agent.                                                                                                                                        |
+| Orchestrator | Software       | Mechanical protocol concerns: identity, routing, round state, delivery, attribution, exposure, and history.                                                                                  |
 
 ## Responsibility boundary
 
-**Coordinator owns semantic judgment.** Examples:
+**Coordinator is an external agent.** Semantic judgment lives in the connected Coordinator chatbot, not in Rayzan. Examples:
 
 - what question is being debated
 - what information a Watcher should receive
@@ -71,6 +115,8 @@ Applications under `apps/` are not created yet.
 - whether another debate round is needed
 - when the debate has converged
 - final synthesis and recommendation
+
+Rayzan must not contain a Coordinator engine that analyzes opinions, decides consensus, or chooses the next question.
 
 **Orchestrator owns mechanical protocol invariants.** Examples:
 

@@ -273,3 +273,23 @@ Decision:
 
 Reason:
 Coordinator already knows which prior messages a Round 2 prompt draws from before anyone is delivered. Confirming delivery should not invent or restate that semantic metadata.
+
+## DEC-028 — Coordinator is an external transport-connected Agent
+
+Status: Accepted
+
+Decision:
+Coordinator intelligence is external to Rayzan. `coordinator` is an Agent role. A Coordinator may use any supported AI provider or model. Provider and role are independent: never infer role from provider, and never bind a provider to a role. Multiple conversations from the same provider may represent different Rayzan Agents and roles. Coordinator uses the same transport abstraction as other agents. Rayzan does not perform semantic debate reasoning. Future structured Coordinator commands are an interface between the external Coordinator and Rayzan, not an internal LLM. Provider and conversation binding belong to a later connection layer, not to `Agent`, `MessageEnvelope`, `DispatchPlan`, `DispatchIntent`, `Round`, or `Debate`.
+
+Reason:
+Rayzan is mechanical control. The debate is conducted by connected chatbots. Treating Coordinator as a special in-process engine, or as “whatever DeepSeek is,” would collapse role, provider, transport, and conversation.
+
+## DEC-029 — Recipient routing is mechanical and provider-agnostic
+
+Status: Accepted
+
+Decision:
+Group addressing is resolved by `DispatchPlanner` from a `DispatchPlan` and `RecipientSelector` into a `DispatchIntent` with concrete `recipientIds`. `round-watchers` means Watcher participants of that round, not every registered Watcher, and the sender must exist with role `coordinator`. `explicit-agents` means the listed Agent IDs and does not require a Coordinator sender. The planner does not depend on a Coordinator provider. Other mechanically valid plans, including Operator → Coordinator and Coordinator → Coder, use the same planner. Canonical `MessageEnvelope` objects still never carry `all-watchers` or role-based addressing.
+
+Reason:
+Broadcast aliases belong above the protocol message. Routing must stay reusable before any Coordinator chatbot, browser binding, or API transport exists.
