@@ -52,6 +52,11 @@
       [hidden] {
         display: none !important;
       }
+      .binding-card {
+        margin-bottom: 1rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid #ddd;
+      }
     </style>
   </head>
   <body>
@@ -85,6 +90,18 @@ Should Rayzan prefer automatic browser capture over copy/paste?</textarea>
       <pre id="round-status">Waiting for agents and Create Round 1.</pre>
     </section>
     <section>
+      <h2>Browser Bindings</h2>
+      <p>
+        Bind each chatbot tab with the Rayzan extension, then press
+        <strong>Send Test</strong> here. No copy/paste.
+      </p>
+      <div id="bindings">Waiting for agents…</div>
+    </section>
+    <section>
+      <h2>Browser Activity</h2>
+      <pre id="activity">(no deliveries)</pre>
+    </section>
+    <section>
       <h2>Protocol State</h2>
       <pre id="protocol">
 Debate:
@@ -106,7 +123,6 @@ Exposures:
 0</pre>
     </section>
     <section>
-      <h2>Errors</h2>
       <pre class="error" id="error"></pre>
     </section>
     <script>
@@ -121,87 +137,193 @@ Exposures:
         return data;
       }
 
+      function escapeHtml(text) {
+        return String(text)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;');
+      }
+
+      let pollTimer;
+      const pendingHoldUntil = new Map();
+
+      function promptValues() {
+        const values = {};
+        for (const box of $('bindings').querySelectorAll('textarea[id^="test-"]')) {
+          values[box.id] = box.value;
+        }
+        return values;
+      }
+
+      function deliveryLabel(status) {
+        if (status === 'pending') return 'Last Delivery: pending';
+        if (status === 'delivered') return 'Last Delivery: delivered ✓';
+        if (status) return 'Last Delivery: ' + status;
+        return 'Last Delivery: (none)';
+      }
+
+      function visibleDeliveryStatus(agentId, status) {
+        const hold = pendingHoldUntil.get(agentId);
+        if (hold && Date.now() < hold) {
+          return 'pending';
+        }
+        if (hold && Date.now() >= hold) {
+          pendingHoldUntil.delete(agentId);
+        }
+        return status;
+      }
+
+      function renderBindings(state) {
+        const saved = promptValues();
+        const fromApi = state.browserBindings || [];
+        const bindings =
+          fromApi.length > 0
+            ? fromApi
+            : (state.agents || [])
+                .filter((a) => a.role !== 'operator')
+                .map((a) => ({
+                  agentId: a.id,
+                  name: a.name,
+                  role: a.role,
+                  state: 'not-bound',
+                }));
+        $('bindings').innerHTML = bindings.length
+          ? bindings
+              .map((b) => {
+                const boundLabel =
+                  b.state === 'bound'
+                    ? 'Bound ✓'
+                    : b.state === 'unavailable'
+                      ? 'Binding unavailable'
+                      : 'Not bound';
+                const fail = b.error
+                  ? `<div class="error">Send failed:\n${escapeHtml(b.error)}</div>`
+                  : '';
+                const boxId = 'test-' + b.agentId;
+                const prompt =
+                  saved[boxId] ?? defaultTestPrompt(b.name);
+                return `<div class="binding-card" data-agent="${escapeHtml(b.agentId)}">
+                    <h3>${escapeHtml(b.name)}</h3>
+                    <pre>Provider: ${escapeHtml(b.provider || '(unknown)')}
+${boundLabel}
+${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDelivery.status))}</pre>
+                    ${fail}
+                    <p>Test prompt:<br><textarea id="${escapeHtml(boxId)}">${escapeHtml(prompt)}</textarea></p>
+                    <button data-send="${escapeHtml(b.agentId)}">Send Test</button>
+                  </div>`;
+              })
+              .join('')
+          : '<pre>Register Agents above. Send Test appears for each one.</pre>';
+      }
+
+      function renderActivity(state) {
+        $('activity').textContent = (state.deliveries || []).length
+          ? (state.deliveries || [])
+              .map(
+                (d) =>
+                  `${d.id}\n${d.recipientId}\n${visibleDeliveryStatus(d.recipientId, d.status)}`,
+              )
+              .join('\n\n')
+          : '(no deliveries)';
+      }
+
+      function schedulePoll(state) {
+        clearTimeout(pollTimer);
+        const holding = [...pendingHoldUntil.values()].some(
+          (until) => until > Date.now(),
+        );
+        const pending =
+          holding ||
+          (state.deliveries || []).some((d) => d.status === 'pending');
+        pollTimer = setTimeout(() => {
+          void refresh();
+        }, pending ? 200 : 1000);
+      }
+
+      function applyState(state) {
+        const agents = (state.agents || []).filter(
+          (a) => a.role !== 'operator',
+        );
+        const coordinator = agents.find((a) => a.role === 'coordinator');
+        const watchers = agents.filter((a) => a.role === 'watcher');
+        $('agents').textContent = agents.length
+          ? agents.map((a) => `${a.name}    ${a.role}`).join('\n')
+          : '(none)';
+        const canCreate =
+          Boolean(coordinator) && watchers.length >= 1 && !state.sessionStarted;
+        if (canCreate) {
+          $('round-create').removeAttribute('hidden');
+        } else {
+          $('round-create').setAttribute('hidden', '');
+        }
+
+        if (!state.debate) {
+          $('round-status').textContent =
+            'Waiting for agents and Create Round 1.';
+        } else {
+          const participants = state.participants || [];
+          const progress = state.roundProgress;
+          $('round-status').textContent = [
+            'Debate',
+            `ID: ${state.debate.id}`,
+            `Status: ${state.debate.status}`,
+            '',
+            `Round ${state.round ? state.round.number : 1}`,
+            `ID: ${state.round ? state.round.id : ''}`,
+            `Status: ${state.round ? state.round.status : ''}`,
+            '',
+            'Participants',
+            participants.length
+              ? participants.map((p) => p.name).join('\n')
+              : '(none)',
+            '',
+            'Progress',
+            progress ? `${progress.responded} / ${progress.expected}` : '0 / 0',
+          ].join('\n');
+        }
+
+        const protocol = state.protocol || {
+          messages: 0,
+          deliveries: 0,
+          exposures: 0,
+        };
+        $('protocol').textContent = [
+          'Debate:',
+          state.debate
+            ? `${state.debate.id}  status=${state.debate.status}`
+            : '(none)',
+          '',
+          'Round:',
+          state.round
+            ? `${state.round.id}  number=${state.round.number}  status=${state.round.status}`
+            : '(none)',
+          '',
+          'Participants:',
+          (state.participants || []).length
+            ? (state.participants || [])
+                .map((p) => `${p.name}  (${p.role})`)
+                .join('\n')
+            : '(none)',
+          '',
+          'Messages:',
+          String(protocol.messages),
+          '',
+          'Deliveries:',
+          String(protocol.deliveries),
+          '',
+          'Exposures:',
+          String(protocol.exposures),
+        ].join('\n');
+        $('error').textContent = state.lastError || '';
+        renderBindings(state);
+        renderActivity(state);
+        schedulePoll(state);
+      }
+
       async function refresh() {
         try {
-          const state = await api('/api/state');
-          const agents = (state.agents || []).filter(
-            (a) => a.role !== 'operator',
-          );
-          const coordinator = agents.find((a) => a.role === 'coordinator');
-          const watchers = agents.filter((a) => a.role === 'watcher');
-          $('agents').textContent = agents.length
-            ? agents.map((a) => `${a.name}    ${a.role}`).join('\n')
-            : '(none)';
-          const canCreate =
-            Boolean(coordinator) &&
-            watchers.length >= 1 &&
-            !state.sessionStarted;
-          if (canCreate) {
-            $('round-create').removeAttribute('hidden');
-          } else {
-            $('round-create').setAttribute('hidden', '');
-          }
-
-          if (!state.debate) {
-            $('round-status').textContent =
-              'Waiting for agents and Create Round 1.';
-          } else {
-            const participants = state.participants || [];
-            const progress = state.roundProgress;
-            $('round-status').textContent = [
-              'Debate',
-              `ID: ${state.debate.id}`,
-              `Status: ${state.debate.status}`,
-              '',
-              `Round ${state.round ? state.round.number : 1}`,
-              `ID: ${state.round ? state.round.id : ''}`,
-              `Status: ${state.round ? state.round.status : ''}`,
-              '',
-              'Participants',
-              participants.length
-                ? participants.map((p) => p.name).join('\n')
-                : '(none)',
-              '',
-              'Progress',
-              progress
-                ? `${progress.responded} / ${progress.expected}`
-                : '0 / 0',
-            ].join('\n');
-          }
-
-          const protocol = state.protocol || {
-            messages: 0,
-            deliveries: 0,
-            exposures: 0,
-          };
-          $('protocol').textContent = [
-            'Debate:',
-            state.debate
-              ? `${state.debate.id}  status=${state.debate.status}`
-              : '(none)',
-            '',
-            'Round:',
-            state.round
-              ? `${state.round.id}  number=${state.round.number}  status=${state.round.status}`
-              : '(none)',
-            '',
-            'Participants:',
-            (state.participants || []).length
-              ? (state.participants || [])
-                  .map((p) => `${p.name}  (${p.role})`)
-                  .join('\n')
-              : '(none)',
-            '',
-            'Messages:',
-            String(protocol.messages),
-            '',
-            'Deliveries:',
-            String(protocol.deliveries),
-            '',
-            'Exposures:',
-            String(protocol.exposures),
-          ].join('\n');
-          $('error').textContent = state.lastError || '';
+          applyState(await api('/api/state'));
         } catch (error) {
           $('error').textContent = error.message;
         }
@@ -236,8 +358,53 @@ Exposures:
         await refresh();
       };
 
+      $('bindings').onclick = async (event) => {
+        const button = event.target.closest('[data-send]');
+        if (!button) {
+          return;
+        }
+        const agentId = button.getAttribute('data-send');
+        const box = document.getElementById('test-' + agentId);
+        pendingHoldUntil.set(agentId, Date.now() + 800);
+        const card = button.closest('.binding-card');
+        const statusPre = card ? card.querySelector('pre') : null;
+        if (statusPre) {
+          statusPre.textContent = statusPre.textContent.replace(
+            /Last Delivery:.*$/m,
+            'Last Delivery: pending',
+          );
+        }
+        $('activity').textContent = 'queued\npending';
+        try {
+          applyState(
+            await api('/api/session/test-send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                agentId,
+                body: box ? box.value : '',
+              }),
+            }),
+          );
+        } catch (error) {
+          pendingHoldUntil.delete(agentId);
+          $('error').textContent = error.message;
+          await refresh();
+        }
+      };
+
+      function defaultTestPrompt(name) {
+        const upper = String(name || '')
+          .toUpperCase()
+          .replace(/[^A-Z0-9]+/g, '_');
+        if (/QWEN/.test(upper)) return 'Reply only with: QWEN_RAYZAN_OK';
+        if (/GLM/.test(upper)) return 'Reply only with: GLM_RAYZAN_OK';
+        if (/DEEPSEEK/.test(upper))
+          return 'Reply only with: DEEPSEEK_RAYZAN_OK';
+        return 'Reply only with: RAYZAN_OK';
+      }
+
       refresh();
-      setInterval(refresh, 1000);
     </script>
   </body>
 </html>

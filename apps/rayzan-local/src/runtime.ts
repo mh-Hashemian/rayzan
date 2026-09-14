@@ -101,6 +101,18 @@ export interface RayzanSnapshot {
     readonly deliveries: number;
     readonly exposures: number;
   };
+  readonly browserBindings: readonly {
+    readonly agentId: string;
+    readonly name: string;
+    readonly role: string;
+    readonly provider?: string;
+    readonly state: 'bound' | 'not-bound' | 'unavailable';
+    readonly lastDelivery?: {
+      readonly id: string;
+      readonly status: string;
+    };
+    readonly error?: string;
+  }[];
   readonly lastCommands?: string;
   readonly lastError?: string;
   readonly log: readonly string[];
@@ -148,6 +160,16 @@ export class RayzanRuntime {
   #lastError: string | undefined;
   #lastCommands: string | undefined;
   #presence = new Map<string, AgentPresence>();
+  #bindings = new Map<
+    string,
+    {
+      provider?: string;
+      tabId?: string;
+      lastSeen: number;
+      available: boolean;
+      error?: string;
+    }
+  >();
 
   constructor() {
     this.agents.register(
@@ -257,6 +279,57 @@ export class RayzanRuntime {
     this.#record('Operator → Coordinator prompt queued for browser delivery.');
   }
 
+  sendTestMessage(agentId: string, body: string): void {
+    this.#requireStarted();
+    const trimmed = body.trim();
+    if (trimmed.length === 0) {
+      throw new Error('test message cannot be empty');
+    }
+    const agent = this.#requireAgent(agentId);
+    if (agent.role === 'operator') {
+      throw new Error('cannot send a test message to the Operator');
+    }
+    const debate = this.#debate();
+    const intent = this.planner.plan(
+      createDispatchPlan({
+        messageId: this.#nextId('msg-test'),
+        debateId: debate.id,
+        senderId: OPERATOR_ID,
+        recipients: {
+          type: 'explicit-agents',
+          agentIds: [agent.id],
+        },
+        kind: 'input',
+        body: trimmed,
+        referencedMessageIds: [],
+      }),
+    );
+    this.orchestrator.dispatch(intent);
+    this.#record(`Test message queued for ${agent.name} (${agent.id}).`);
+  }
+
+  noteBinding(input: {
+    agentId: string;
+    provider?: string;
+    tabId?: string;
+    available: boolean;
+    error?: string;
+  }): void {
+    const agent = this.#requireAgent(input.agentId);
+    this.#bindings.set(agent.id, {
+      ...(input.provider ? { provider: input.provider } : {}),
+      ...(input.tabId ? { tabId: input.tabId } : {}),
+      lastSeen: Date.now(),
+      available: input.available,
+      ...(input.error ? { error: input.error } : {}),
+    });
+    this.#record(
+      input.available
+        ? `Browser binding set for ${agent.name}${input.provider ? ` (${input.provider})` : ''}.`
+        : `Browser binding unavailable for ${agent.name}.`,
+    );
+  }
+
   startRound1(problem: string): void {
     this.createRound1(problem);
     this.sendToCoordinator();
@@ -283,6 +356,15 @@ export class RayzanRuntime {
     });
     if (phase === 'error' && input.error) {
       this.#lastError = `${agent.name}: ${input.error}`;
+    }
+    const existing = this.#bindings.get(agent.id);
+    if (existing?.available) {
+      this.#bindings.set(agent.id, {
+        ...existing,
+        lastSeen: Date.now(),
+        ...(input.provider ? { provider: input.provider } : {}),
+        ...(phase === 'error' && input.error ? { error: input.error } : {}),
+      });
     }
   }
 
@@ -459,6 +541,10 @@ export class RayzanRuntime {
           ? this.exposures.listByDebate(debateRecord.id).length
           : 0,
       },
+      browserBindings: this.agents
+        .list()
+        .filter((agent) => agent.role !== 'operator')
+        .map((agent) => this.#bindingSnapshot(agent, now)),
       ...(this.#lastCommands ? { lastCommands: this.#lastCommands } : {}),
       ...(this.#lastError ? { lastError: this.#lastError } : {}),
       log: [...this.#log],
@@ -607,6 +693,37 @@ export class RayzanRuntime {
       throw new Error('round missing');
     }
     return round;
+  }
+
+  #bindingSnapshot(
+    agent: Agent,
+    now: number,
+  ): RayzanSnapshot['browserBindings'][number] {
+    const binding = this.#bindings.get(agent.id);
+    const presence = this.#presence.get(agent.id);
+    const last = this.transport
+      .listAll()
+      .filter((delivery) => delivery.recipientId === agent.id)
+      .at(-1);
+    let state: 'bound' | 'not-bound' | 'unavailable' = 'not-bound';
+    if (binding?.available === false) {
+      state = 'unavailable';
+    } else if (binding?.available === true) {
+      state = now - binding.lastSeen < CONNECTED_MS ? 'bound' : 'unavailable';
+    }
+    return {
+      agentId: agent.id,
+      name: agent.name,
+      role: agent.role,
+      ...(binding?.provider || presence?.provider
+        ? { provider: binding?.provider ?? presence?.provider }
+        : {}),
+      state,
+      ...(last ? { lastDelivery: { id: last.id, status: last.status } } : {}),
+      ...(binding?.error || presence?.error
+        ? { error: binding?.error ?? presence?.error }
+        : {}),
+    };
   }
 
   #agentId(name: string): string {

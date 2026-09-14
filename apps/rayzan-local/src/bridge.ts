@@ -77,6 +77,30 @@ export async function handleBridgeRequest(
       write(response, 200, { ok: true });
       return true;
     }
+    if (request.method === 'POST' && url.pathname === '/api/bindings') {
+      const body = await readJson(request);
+      runtime.noteBinding({
+        agentId: String(body.agentId ?? ''),
+        provider: typeof body.provider === 'string' ? body.provider : undefined,
+        tabId: typeof body.tabId === 'string' ? body.tabId : undefined,
+        available: body.available !== false,
+        error: typeof body.error === 'string' ? body.error : undefined,
+      });
+      write(response, 200, { ok: true });
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/session/test-send'
+    ) {
+      const body = await readJson(request);
+      runtime.sendTestMessage(
+        String(body.agentId ?? ''),
+        String(body.body ?? ''),
+      );
+      write(response, 200, runtime.snapshot());
+      return true;
+    }
     if (
       request.method === 'GET' &&
       url.pathname === '/api/deliveries/pending'

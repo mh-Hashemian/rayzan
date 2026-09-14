@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rayzan</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        width: 300px;
+        margin: 0.75rem;
+      }
+      select,
+      button {
+        width: 100%;
+        margin-top: 0.4rem;
+      }
+      .error {
+        color: #a40000;
+        white-space: pre-wrap;
+      }
+      pre {
+        white-space: pre-wrap;
+        background: #f6f6f6;
+        padding: 0.4rem;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rayzan</h1>
+    <div id="bridge">Local Bridge: …</div>
+    <div id="page">Detected Provider: …</div>
+    <div id="current-binding">Current Binding: Not bound</div>
+    <div id="bind-panel">
+      <label>
+        Bind to:
+        <select id="agent"></select>
+      </label>
+      <button id="bind">Bind</button>
+    </div>
+    <div id="bound-panel" hidden>
+      <p id="binding"></p>
+      <p id="status">Status: Waiting for Rayzan delivery</p>
+      <button id="unbind">Unbind</button>
+    </div>
+    <p class="error" id="error"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>

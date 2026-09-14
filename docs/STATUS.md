@@ -14,7 +14,7 @@ Completed:
 
 Currently being worked on:
 
-- Checkpoint 3A.2 — browser binding and automatic prompt delivery
+- Checkpoint 3A.2 — browser binding and automatic prompt delivery (send only; no capture)
 
 Next:
 

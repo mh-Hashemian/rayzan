@@ -1,0 +1,17 @@
+{
+  "name": "@rayzan/browser-extension",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/adapters.test.ts"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.25.10",
+    "tsx": "^4.23.13",
+    "linkedom": "^0.18.12"
+  }
+}

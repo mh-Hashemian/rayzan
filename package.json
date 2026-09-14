@@ -7,11 +7,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && pnpm --filter @rayzan/browser-extension typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "pnpm --filter @rayzan/protocol --filter @rayzan/transport --filter @rayzan/orchestrator --filter @rayzan/local test",
+    "test": "pnpm --filter @rayzan/protocol --filter @rayzan/transport --filter @rayzan/orchestrator --filter @rayzan/local --filter @rayzan/browser-extension test",
+    "build:extension": "pnpm --filter @rayzan/browser-extension build",
     "build:local": "pnpm --filter @rayzan/local build",
     "start:local": "pnpm --filter @rayzan/local start"
   },

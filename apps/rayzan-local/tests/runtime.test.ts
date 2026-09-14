@@ -38,6 +38,43 @@ describe('RayzanRuntime Round 1', () => {
     assert.equal(runtime.nextPendingForAgent(glm.id), undefined);
   });
 
+  it('sends a test message through BrowserTransport pending → delivered only', () => {
+    const runtime = new RayzanRuntime();
+    runtime.registerAgent('DeepSeek Coordinator', 'coordinator');
+    const qwen = runtime.registerAgent('Qwen', 'watcher');
+    const glm = runtime.registerAgent('GLM', 'watcher');
+    runtime.createRound1('Binding checkpoint');
+    runtime.noteBinding({
+      agentId: qwen.id,
+      provider: 'Qwen',
+      tabId: '12',
+      available: true,
+    });
+
+    runtime.sendTestMessage(qwen.id, 'Reply only with: QWEN_RAYZAN_OK');
+    const qwenJob = runtime.nextPendingForAgent(qwen.id);
+    assert.ok(qwenJob);
+    assert.equal(runtime.nextPendingForAgent(glm.id), undefined);
+    assert.equal(runtime.snapshot().roundProgress?.responded, 0);
+
+    runtime.acknowledgeDelivery(qwen.id, qwenJob.deliveryId);
+    const afterAck = runtime.snapshot();
+    assert.equal(
+      afterAck.deliveries.find((delivery) => delivery.id === qwenJob.deliveryId)
+        ?.status,
+      'delivered',
+    );
+    assert.equal(afterAck.roundProgress?.responded, 0);
+    assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
+
+    assert.throws(() =>
+      runtime.acknowledgeDelivery(qwen.id, qwenJob.deliveryId),
+    );
+    assert.throws(() =>
+      runtime.acknowledgeDelivery(glm.id, qwenJob.deliveryId),
+    );
+  });
+
   it('routes Coordinator dispatch to Qwen and GLM then auto-completes', () => {
     const runtime = new RayzanRuntime();
     const coordinator = runtime.registerAgent(
