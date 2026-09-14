@@ -16,6 +16,17 @@ export {
   type RoundParticipantContext,
 } from './dispatch-planner.js';
 export {
+  COORDINATOR_COMMAND_PROTOCOL_VERSION,
+  COORDINATOR_COMMAND_TYPES,
+  type CompleteRoundCommand,
+  type CoordinatorCommand,
+  type CoordinatorCommandBatch,
+  type CoordinatorCommandType,
+  type DispatchCommand,
+  type FinalizeDebateCommand,
+} from './coordinator-command.js';
+export { parseCoordinatorCommandBatch } from './coordinator-command-parser.js';
+export {
   RoundWorkflow,
   type ParticipantProgress,
   type RoundProgress,

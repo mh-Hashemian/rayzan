@@ -40,7 +40,25 @@ Rayzan is not the intelligence that conducts a debate. Coordinator, Watchers, an
 
 `coordinator` is an Agent role, not a provider and not a Rayzan-built reasoning engine. The same AI provider may host different Rayzan agents and roles at once (for example a DeepSeek Coordinator conversation and a DeepSeek Reviewer Watcher). Role, provider, transport, and browser conversation are independent. Protocol and routing code must not infer role from provider, and must not carry `browserTabId`, `providerName`, `conversationUrl`, or DOM selectors on `Agent`, `MessageEnvelope`, `DispatchPlan`, `DispatchIntent`, `Round`, or `Debate`.
 
-Future Coordinator commands are a structured interface between that external chatbot and Rayzan. They are not implemented yet.
+Future Coordinator commands are a structured interface between that external chatbot and Rayzan. Phase 2E parses those commands. It does not execute them. `start-round` is intentionally deferred until round-creation semantics are designed.
+
+```text
+Coordinator Agent
+    ↓
+raw response
+    ↓
+CoordinatorCommandParser
+    ↓
+CoordinatorCommandBatch
+    ↓
+future CommandExecutor
+    ↓
+DispatchPlan / RoundWorkflow / etc.
+```
+
+A Coordinator response is raw text. A `CoordinatorCommand` is a validated mechanical instruction. Rayzan does not infer actions from prose. v1 requires the entire response to be JSON; wrapped or mixed prose is rejected. Coordinator output is untrusted: it never goes through `eval`, dynamic method dispatch, or arbitrary tool execution. The command vocabulary is a closed union (`dispatch`, `complete-round`, `finalize-debate`) and is the same for every Coordinator provider.
+
+`dispatch` omits `senderId`. The future executor binds the sender from the inbound Coordinator message so a command cannot impersonate another Agent through JSON.
 
 Addressing is expanded before a canonical message exists:
 

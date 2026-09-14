@@ -33,6 +33,8 @@
 - [x] Support personalized Round 2 messages
 - [x] Declare exposure references at dispatch and materialize them on confirm
 - [x] Support Coordinator routing
+- [x] Parse Coordinator command protocol
+- [ ] Execute Coordinator commands
 - [ ] Support additional rounds
 - [ ] Support adding fresh Watchers during a debate
 

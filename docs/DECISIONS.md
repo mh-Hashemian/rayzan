@@ -293,3 +293,33 @@ Group addressing is resolved by `DispatchPlanner` from a `DispatchPlan` and `Rec
 
 Reason:
 Broadcast aliases belong above the protocol message. Routing must stay reusable before any Coordinator chatbot, browser binding, or API transport exists.
+
+## DEC-030 — Coordinator communicates through a versioned command protocol
+
+Status: Accepted
+
+Decision:
+The external Coordinator produces explicit machine-readable commands. v1 is a JSON document `{ version: 1, commands: CoordinatorCommand[] }`. Commands are a closed union: `dispatch`, `complete-round`, and `finalize-debate`. `dispatch` does not include `senderId`; the future executor supplies it from the inbound Coordinator message. `complete-round` requests later mechanical round closure, not debate convergence. `finalize-debate` carries the Coordinator's synthesis text without semantic validation. `start-round` is deferred because it mixes entity creation, round numbering, and participant selection. Phase 2E parses only. It does not execute.
+
+Reason:
+Rayzan must not infer actions from arbitrary chatbot prose. A versioned, explicit command list is the interface between the external Coordinator and existing orchestration.
+
+## DEC-031 — Coordinator output is untrusted
+
+Status: Accepted
+
+Decision:
+Coordinator chatbot output is untrusted input even though Coordinator is a Rayzan Agent. Raw text is parsed strictly into a closed command union before Rayzan can act. The parser validates shape and syntax only: invalid JSON, unknown fields, unknown command types, wrong primitives, empty required bodies, invalid selectors, and duplicate IDs are rejected. The parser does not consult stores or invoke orchestration. There is no `eval`, no dynamic method dispatch, and no generic tool/shell/HTTP command.
+
+Reason:
+A connected model can emit anything. Mechanical safety depends on parsing into known commands, then executing those commands later against protocol state.
+
+## DEC-032 — Coordinator command protocol is provider-independent
+
+Status: Accepted
+
+Decision:
+DeepSeek, ChatGPT, Qwen, GLM, tests, and future API Coordinators use the same command schema. Provider adapters may later handle how text is delivered and captured. They do not define Rayzan commands.
+
+Reason:
+Role, provider, and transport stay independent. Command meaning belongs to Rayzan, not to a vendor-specific formatter.
