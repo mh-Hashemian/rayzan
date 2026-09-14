@@ -13,6 +13,6 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true
   },
-  "include": ["dev/**/*.ts", "packages/**/*.ts"],
+  "include": ["dev/**/*.ts", "packages/**/*.ts", "apps/rayzan-local/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

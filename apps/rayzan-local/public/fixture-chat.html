@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rayzan Fixture Chat</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 1.5rem;
+        max-width: 800px;
+      }
+      textarea,
+      pre {
+        width: 100%;
+        min-height: 8rem;
+        white-space: pre-wrap;
+      }
+      button {
+        margin-right: 0.5rem;
+        margin-top: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rayzan fixture chat</h1>
+    <p>
+      Deterministic local chatbot stand-in. Bind this tab in the Rayzan
+      extension as Coordinator or Watcher.
+    </p>
+    <h2>Incoming prompt</h2>
+    <pre id="incoming-prompt">(none yet)</pre>
+    <h2>Response to capture</h2>
+    <textarea id="response-text"></textarea>
+    <div>
+      <button id="fill-dispatch">Fill Coordinator dispatch JSON</button>
+      <button id="fill-watcher">Fill Watcher analysis</button>
+      <button id="fill-finalize">Fill complete-round + finalize JSON</button>
+    </div>
+    <script>
+      const promptEl = document.getElementById('incoming-prompt');
+      const responseEl = document.getElementById('response-text');
+
+      window.addEventListener('rayzan-fixture-prompt', (event) => {
+        promptEl.textContent = event.detail.text;
+      });
+
+      document.getElementById('fill-dispatch').onclick = () => {
+        responseEl.value = JSON.stringify(
+          {
+            version: 1,
+            commands: [
+              {
+                type: 'dispatch',
+                messageId: 'round1-brief',
+                debateId: 'debate-1',
+                roundId: 'round-1',
+                recipients: { type: 'round-watchers' },
+                kind: 'brief',
+                body: 'Analyze this independently.',
+                referencedMessageIds: [],
+              },
+            ],
+          },
+          null,
+          2,
+        );
+      };
+
+      document.getElementById('fill-watcher').onclick = () => {
+        responseEl.value =
+          'The Watcher recommends preferring browser transport over copy/paste because it preserves attribution.';
+      };
+
+      document.getElementById('fill-finalize').onclick = () => {
+        responseEl.value = JSON.stringify(
+          {
+            version: 1,
+            commands: [
+              {
+                type: 'complete-round',
+                debateId: 'debate-1',
+                roundId: 'round-1',
+              },
+              {
+                type: 'finalize-debate',
+                debateId: 'debate-1',
+                body: 'Use the browser transport. Copy/paste remains fallback only.',
+              },
+            ],
+          },
+          null,
+          2,
+        );
+      };
+    </script>
+  </body>
+</html>

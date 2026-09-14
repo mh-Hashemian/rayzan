@@ -40,14 +40,11 @@
 
 ## Phase 3 — Browser Bridge
 
-- [ ] Create browser extension foundation
-- [ ] Connect extension to local orchestrator
-- [ ] Implement explicit tab-to-agent binding
-- [ ] Define BrowserAdapter interface
-- [ ] Implement first provider adapter
-- [ ] Implement prompt sending
-- [ ] Implement Operator-triggered response capture
-- [ ] Implement manual fallback when adapter fails
+- [x] Visible local Rayzan session: Agent registration and Round 1 bootstrap (Checkpoint 3A.1)
+- [ ] Browser extension tab binding
+- [ ] Automatic prompt delivery to bound conversations
+- [ ] Automatic response capture
+- [ ] Parallel Round 1 close
 
 ## Later
 

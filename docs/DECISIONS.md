@@ -363,3 +363,61 @@ Decision:
 
 Reason:
 A synthesis has no concrete protocol recipients yet. Forcing it into `MessageEnvelope` would invent a fake Operator message.
+
+## DEC-037 — BrowserTransport is provider-independent
+
+Status: Accepted
+
+Decision:
+`BrowserTransport` implements the same pending → delivered → responded lifecycle as ManualTransport. It exposes a per-agent outbox. It does not contain tab IDs, provider names, URLs, or DOM selectors. The extension reports successful submission before Rayzan marks a delivery `delivered`. Failed injection leaves the delivery pending.
+
+Reason:
+Provider DOM changes must not leak into protocol or transport.
+
+## DEC-038 — Tab binding and provider DOM live only in the browser layer
+
+Status: Accepted
+
+Decision:
+The extension binds a tab to a Rayzan Agent ID. Protocol `Agent` remains `id`, `name`, `role`. Adapter modules own `canHandle`, `sendPrompt`, and `captureLatestResponse`. Manual Capture is the MVP completion signal. Phase 3A demo bootstraps one active Debate/Round in `apps/rayzan-local` because `start-round` is deferred. `Continue Coordinator` is a temporary application relay of an already-stored Watcher response.
+
+Reason:
+The first usable slice must prove provider ≠ Agent ≠ role without expanding the protocol model.
+
+## DEC-039 — Automatic capture is the default browser behavior
+
+Status: Accepted
+
+Decision:
+Browser adapters snapshot assistant-turn state, send the prompt, wait for a **new** assistant turn, then wait for provider-specific generation completion plus a short text-stability window. Manual Capture and Retry Auto Capture are fallback/debug actions only. Completion detection and DOM selectors stay in adapter modules. Responses are submitted against the delivery ID from that send cycle, never inferred from response text.
+
+Reason:
+Capturing the last message after an arbitrary timeout can steal an older turn.
+
+## DEC-040 — Round 1 application auto-closes collection when complete
+
+Status: Accepted
+
+Decision:
+`rayzan-local` calls `RoundWorkflow.completeRound` when `progress.complete` becomes true after Watcher responses. This is application automation for the Round 1 MVP. `RoundWorkflow` does not globally auto-complete. This is not debate convergence and does not create Round 2.
+
+Reason:
+All-responses-received is mechanical collection, not semantic consensus.
+
+## DEC-041 — V1 debate topology (Round 2 not implemented)
+
+Status: Accepted as documentation; Round 2 is not implemented in Phase 3A
+
+Decision:
+Default v1 deliberation:
+
+- Round 1: independent parallel Watcher responses
+- Round 2: mechanically complete common evidence packet plus Coordinator personalized challenges
+- Then Coordinator synthesis
+
+For 2–4 Watchers, the intended Round 2 common packet is the full attributed Round 1 responses. Coordinator cannot hide baseline Round 1 evidence.
+
+Phase 3A stops after a complete real Round 1. Round 2 is not implemented yet.
+
+Reason:
+The Operator wants a usable Round 1 before any later-round automation.

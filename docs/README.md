@@ -11,4 +11,3 @@ This directory is the project record. These files are maintained as the project 
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Roles, responsibility boundaries, transports, browser-bridge placement, and state ownership |
 | [DECISIONS.md](DECISIONS.md)       | Append-only record of accepted product and architecture decisions                           |
 | [TASKS.md](TASKS.md)               | Backlog and phase checklist                                                                 |
-| [STATUS.md](STATUS.md)             | Current phase, completed work, next work, and blockers                                      |

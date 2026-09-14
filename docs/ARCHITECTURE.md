@@ -8,9 +8,11 @@ This repository is a pnpm TypeScript workspace.
 rayzan/
 ├── packages/
 │   ├── protocol/        # shared protocol/domain model
-│   ├── transport/       # delivery abstraction and ManualTransport
-│   └── orchestrator/    # connects protocol stores to transports
-├── apps/                # later: dashboard, extension, ...
+│   ├── transport/       # ManualTransport + provider-independent BrowserTransport
+│   └── orchestrator/    # stores, routing, command parse/execute
+├── apps/
+│   ├── rayzan-local/    # composition root, dashboard, HTTP bridge, fixture chat
+│   └── browser-extension/
 └── docs/
 ```
 
@@ -102,6 +104,16 @@ References are attached to each per-recipient delivery at dispatch and materiali
 
 `RoundWorkflow` tracks mechanical state for one round: who is expected to respond, which deliveries belong to the round, and whether those responses have arrived. Coordinator chooses participants and content. Orchestrator does not decide when another round is needed or whether the debate has converged. All-responses-received is not convergence. A new round is never created automatically.
 
+Documented v1 debate strategy (Round 2 not implemented):
+
+```text
+Round 1: independent parallel Watcher responses
+Round 2: common unfiltered evidence packet + Coordinator personalized challenges
+Then Coordinator synthesis
+```
+
+Phase 3A implements only Round 1.
+
 Protocol `Round` status is reused as:
 
 ```text
@@ -119,7 +131,31 @@ Broadcast or group addressing is expanded into concrete `recipientIds` before a 
 
 Application commands such as create debate, add watcher, or bind a browser tab are not `MessageEnvelope` objects.
 
-Applications under `apps/` are not created yet.
+Phase 3A Round 1 vertical slice:
+
+```text
+DeepSeek Coordinator
+        ↕
+DeepSeekAdapter
+        ↕
+Browser Extension
+        ↕
+Local Bridge
+        ↕
+BrowserTransport
+        ↕
+Orchestrator
+        ↓
+DispatchPlanner / CoordinatorCommandExecutor
+        ↓
+Qwen / GLM Browser Deliveries
+        ↕
+QwenAdapter / GLMAdapter
+```
+
+`BrowserTransport` is provider-independent. Automatic capture is the default: adapters snapshot assistant-turn count, send, wait for a **new** turn, then wait for provider completion plus a short stability window. Manual Capture is fallback only. Tab/conversation binding exists only in the browser layer. Protocol `Agent` still has no provider, tab, or URL fields.
+
+Phase 3A demo bootstraps one active Debate/Round 1 from registered Watchers because `start-round` is deferred. When both Watcher responses are recorded, `rayzan-local` calls `completeRound`. That is not debate convergence and does not create Round 2.
 
 ## Roles
 
@@ -190,7 +226,7 @@ The browser extension is a generic browser bridge. It connects a bound tab to an
 
 ```text
 adapters/
-├── chatgpt.ts
+├── fixture.ts
 ├── deepseek.ts
 ├── qwen.ts
 └── glm.ts
@@ -198,9 +234,9 @@ adapters/
 
 An adapter is not a separate project. It is provider-specific source code inside the browser-extension layer.
 
-A broken adapter must not stop the debate. That provider degrades to manual transport.
+A broken adapter must not stop the debate. That provider degrades to manual capture fallback.
 
-Browser captures initially require Operator confirmation. Automatic completion detection is not required for the first browser MVP.
+Automatic capture is the default for bound tabs. Manual Capture is fallback/debug only.
 
 ## State
 

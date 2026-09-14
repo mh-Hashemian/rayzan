@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rayzan — Browser MVP</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 1.5rem;
+        max-width: 960px;
+      }
+      section {
+        border: 1px solid #ccc;
+        padding: 0.75rem 1rem;
+        margin-bottom: 1rem;
+      }
+      pre {
+        white-space: pre-wrap;
+        background: #f6f6f6;
+        padding: 0.5rem;
+      }
+      input,
+      textarea,
+      select {
+        width: 100%;
+        margin-top: 0.25rem;
+      }
+      textarea {
+        min-height: 4rem;
+      }
+      .error {
+        color: #a40000;
+      }
+      .ok {
+        color: #0b6b0b;
+      }
+      button {
+        margin-right: 0.5rem;
+        margin-top: 0.5rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      td,
+      th {
+        border: 1px solid #ddd;
+        padding: 0.25rem 0.5rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rayzan — Browser MVP</h1>
+    <section>
+      <h2>Agents</h2>
+      <p>
+        Name:<br />
+        <input id="agent-name" placeholder="DeepSeek Coordinator" />
+      </p>
+      <p>
+        Role:<br />
+        <select id="agent-role">
+          <option value="coordinator">coordinator</option>
+          <option value="watcher">watcher</option>
+        </select>
+      </p>
+      <button id="add-agent">Add Agent</button>
+      <pre id="agents">(none)</pre>
+    </section>
+    <section id="round-create" hidden>
+      <h2>Problem</h2>
+      <p>
+        <textarea id="problem">
+Should Rayzan prefer automatic browser capture over copy/paste?</textarea>
+      </p>
+      <button id="create-round">Create Round 1</button>
+    </section>
+    <section>
+      <h2>Round 1</h2>
+      <pre id="round-status">Waiting for agents and Create Round 1.</pre>
+    </section>
+    <section>
+      <h2>Protocol State</h2>
+      <pre id="protocol">
+Debate:
+(none)
+
+Round:
+(none)
+
+Participants:
+(none)
+
+Messages:
+0
+
+Deliveries:
+0
+
+Exposures:
+0</pre>
+    </section>
+    <section>
+      <h2>Errors</h2>
+      <pre class="error" id="error"></pre>
+    </section>
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      async function api(path, options) {
+        const response = await fetch(path, options);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || response.statusText);
+        }
+        return data;
+      }
+
+      async function refresh() {
+        try {
+          const state = await api('/api/state');
+          const agents = (state.agents || []).filter(
+            (a) => a.role !== 'operator',
+          );
+          const coordinator = agents.find((a) => a.role === 'coordinator');
+          const watchers = agents.filter((a) => a.role === 'watcher');
+          $('agents').textContent = agents.length
+            ? agents.map((a) => `${a.name}    ${a.role}`).join('\n')
+            : '(none)';
+          const canCreate =
+            Boolean(coordinator) &&
+            watchers.length >= 1 &&
+            !state.sessionStarted;
+          if (canCreate) {
+            $('round-create').removeAttribute('hidden');
+          } else {
+            $('round-create').setAttribute('hidden', '');
+          }
+
+          if (!state.debate) {
+            $('round-status').textContent =
+              'Waiting for agents and Create Round 1.';
+          } else {
+            const participants = state.participants || [];
+            const progress = state.roundProgress;
+            $('round-status').textContent = [
+              'Debate',
+              `ID: ${state.debate.id}`,
+              `Status: ${state.debate.status}`,
+              '',
+              `Round ${state.round ? state.round.number : 1}`,
+              `ID: ${state.round ? state.round.id : ''}`,
+              `Status: ${state.round ? state.round.status : ''}`,
+              '',
+              'Participants',
+              participants.length
+                ? participants.map((p) => p.name).join('\n')
+                : '(none)',
+              '',
+              'Progress',
+              progress
+                ? `${progress.responded} / ${progress.expected}`
+                : '0 / 0',
+            ].join('\n');
+          }
+
+          const protocol = state.protocol || {
+            messages: 0,
+            deliveries: 0,
+            exposures: 0,
+          };
+          $('protocol').textContent = [
+            'Debate:',
+            state.debate
+              ? `${state.debate.id}  status=${state.debate.status}`
+              : '(none)',
+            '',
+            'Round:',
+            state.round
+              ? `${state.round.id}  number=${state.round.number}  status=${state.round.status}`
+              : '(none)',
+            '',
+            'Participants:',
+            (state.participants || []).length
+              ? (state.participants || [])
+                  .map((p) => `${p.name}  (${p.role})`)
+                  .join('\n')
+              : '(none)',
+            '',
+            'Messages:',
+            String(protocol.messages),
+            '',
+            'Deliveries:',
+            String(protocol.deliveries),
+            '',
+            'Exposures:',
+            String(protocol.exposures),
+          ].join('\n');
+          $('error').textContent = state.lastError || '';
+        } catch (error) {
+          $('error').textContent = error.message;
+        }
+      }
+
+      $('add-agent').onclick = async () => {
+        try {
+          await api('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: $('agent-name').value,
+              role: $('agent-role').value,
+            }),
+          });
+          $('agent-name').value = '';
+        } catch (error) {
+          $('error').textContent = error.message;
+        }
+        await refresh();
+      };
+      $('create-round').onclick = async () => {
+        try {
+          await api('/api/session/create-round', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ problem: $('problem').value }),
+          });
+        } catch (error) {
+          $('error').textContent = error.message;
+        }
+        await refresh();
+      };
+
+      refresh();
+      setInterval(refresh, 1000);
+    </script>
+  </body>
+</html>

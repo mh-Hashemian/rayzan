@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "pnpm --filter @rayzan/protocol --filter @rayzan/transport --filter @rayzan/orchestrator test"
+    "test": "pnpm --filter @rayzan/protocol --filter @rayzan/transport --filter @rayzan/orchestrator --filter @rayzan/local test",
+    "build:local": "pnpm --filter @rayzan/local build",
+    "start:local": "pnpm --filter @rayzan/local start"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

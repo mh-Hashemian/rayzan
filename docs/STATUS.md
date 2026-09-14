@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 2 — Debate Workflow
+Current phase: Phase 3A — Real browser Round 1 MVP (checkpointed)
 
 Completed:
 
@@ -8,22 +8,17 @@ Completed:
 - Baseline dependencies
 - Initial project documentation
 - `packages/protocol` domain model and in-memory stores
-- `@rayzan/transport` abstraction, ManualTransport, and delivery lifecycle
-- `@rayzan/orchestrator` dispatch, confirm-delivery/exposure, and response storage
-- Mechanical round execution (`RoundWorkflow`)
-- `DispatchIntent` exposure metadata declared at dispatch
-- Recipient routing via `DispatchPlan` / `DispatchPlanner`
-- Coordinator command protocol parser (`dispatch`, `complete-round`, `finalize-debate`)
-- Coordinator command execution against existing orchestration
+- `@rayzan/transport` abstraction, ManualTransport, delivery lifecycle, BrowserTransport
+- `@rayzan/orchestrator` dispatch, rounds, command parse/execute
+- Checkpoint 3A.1: visible local Agent registration and Round 1 bootstrap (Operator accepted)
 
 Currently being worked on:
 
-- Nothing. Phase 2F command execution is complete.
+- Checkpoint 3A.2 — browser binding and automatic prompt delivery
 
 Next:
 
-- Remaining debate workflow (`start-round` deferred, additional rounds, adding Watchers)
-- Coordinator connectivity and browser/API transports are not started
+- Automatic response capture after 3A.2 is accepted
 
 Blockers:
 

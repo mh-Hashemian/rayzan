@@ -1,4 +1,5 @@
 export { ManualTransport } from './manual-transport.js';
+export { BrowserTransport } from './browser-transport.js';
 export { TransportError } from './error.js';
 export { asDeliveryId, type DeliveryId } from './ids.js';
 export {
