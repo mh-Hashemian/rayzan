@@ -11,7 +11,9 @@ import {
 } from '@rayzan/protocol';
 import { ManualTransport, TransportError } from '@rayzan/transport';
 
+import { createDispatchIntent } from '../src/dispatch-intent.js';
 import { Orchestrator } from '../src/orchestrator.js';
+import { OrchestratorError } from '../src/error.js';
 
 function setup() {
   const messages = new InMemoryMessageStore();
@@ -93,7 +95,12 @@ describe('Orchestrator', () => {
       brief,
     } = setup();
 
-    const deliveries = orchestrator.dispatch(brief);
+    const deliveries = orchestrator.dispatch(
+      createDispatchIntent({
+        message: brief,
+        referencedMessageIds: [],
+      }),
+    );
 
     assert.equal(messages.getById(brief.id), brief);
     assert.equal(deliveries.length, 3);
@@ -153,7 +160,12 @@ describe('Orchestrator', () => {
     const { messages, exposures, orchestrator, qwen, deepSeek, brief } =
       setup();
 
-    const deliveries = orchestrator.dispatch(brief);
+    const deliveries = orchestrator.dispatch(
+      createDispatchIntent({
+        message: brief,
+        referencedMessageIds: [],
+      }),
+    );
     const qwenDelivery = deliveries.find(
       (delivery) => delivery.recipientId === qwen.id,
     );
@@ -182,7 +194,7 @@ describe('Orchestrator', () => {
 
     assert.throws(
       () => orchestrator.confirmDelivery('missing-delivery'),
-      TransportError,
+      OrchestratorError,
     );
     assert.deepEqual(exposures.listByDebate(brief.debateId), []);
 
@@ -229,5 +241,63 @@ describe('Orchestrator', () => {
       .listByDebate(brief.debateId)
       .filter((message) => message.kind === 'response');
     assert.deepEqual(responses, [inbound.message]);
+  });
+
+  it('rejects unknown, cross-debate, and duplicate referenced message ids', () => {
+    const { orchestrator, messages, qwen, coordinator, debate, brief } =
+      setup();
+
+    assert.throws(
+      () =>
+        orchestrator.dispatch(
+          createDispatchIntent({
+            message: brief,
+            referencedMessageIds: ['msg-missing'],
+          }),
+        ),
+      OrchestratorError,
+    );
+
+    messages.store(
+      createMessageEnvelope({
+        id: 'msg-other-debate',
+        debateId: 'debate-other',
+        senderId: coordinator.id,
+        recipientIds: [qwen.id],
+        kind: 'brief',
+        body: 'other debate',
+      }),
+    );
+
+    assert.throws(
+      () =>
+        orchestrator.dispatch(
+          createDispatchIntent({
+            message: brief,
+            referencedMessageIds: ['msg-other-debate'],
+          }),
+        ),
+      OrchestratorError,
+    );
+
+    messages.store(
+      createMessageEnvelope({
+        id: 'msg-same-debate',
+        debateId: debate.id,
+        senderId: coordinator.id,
+        recipientIds: [qwen.id],
+        kind: 'fact',
+        body: 'prior fact',
+      }),
+    );
+
+    assert.throws(
+      () =>
+        createDispatchIntent({
+          message: brief,
+          referencedMessageIds: ['msg-same-debate', 'msg-same-debate'],
+        }),
+      OrchestratorError,
+    );
   });
 });

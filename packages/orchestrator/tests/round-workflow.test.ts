@@ -14,6 +14,7 @@ import {
 } from '@rayzan/protocol';
 import { ManualTransport } from '@rayzan/transport';
 
+import { createDispatchIntent } from '../src/dispatch-intent.js';
 import { OrchestratorError } from '../src/error.js';
 import { Orchestrator } from '../src/orchestrator.js';
 import { RoundWorkflow } from '../src/round-workflow.js';
@@ -107,7 +108,13 @@ describe('RoundWorkflow', () => {
       body: 'GLOBAL ROUND 1 MESSAGE',
     });
 
-    const deliveries = workflow.dispatch(round1.id, brief);
+    const deliveries = workflow.dispatch(
+      round1.id,
+      createDispatchIntent({
+        message: brief,
+        referencedMessageIds: [],
+      }),
+    );
     let progress = workflow.getRoundProgress(round1.id);
 
     assert.equal(progress.expected, 3);
@@ -211,9 +218,27 @@ describe('RoundWorkflow', () => {
       body: 'ROUND 2 MESSAGE FOR GLM',
     });
 
-    const qwenDelivery = workflow.dispatch(round2.id, qwenMessage)[0];
-    const deepSeekDelivery = workflow.dispatch(round2.id, deepSeekMessage)[0];
-    const glmDelivery = workflow.dispatch(round2.id, glmMessage)[0];
+    const qwenDelivery = workflow.dispatch(
+      round2.id,
+      createDispatchIntent({
+        message: qwenMessage,
+        referencedMessageIds: [],
+      }),
+    )[0];
+    const deepSeekDelivery = workflow.dispatch(
+      round2.id,
+      createDispatchIntent({
+        message: deepSeekMessage,
+        referencedMessageIds: [],
+      }),
+    )[0];
+    const glmDelivery = workflow.dispatch(
+      round2.id,
+      createDispatchIntent({
+        message: glmMessage,
+        referencedMessageIds: [],
+      }),
+    )[0];
     assert.ok(qwenDelivery);
     assert.ok(deepSeekDelivery);
     assert.ok(glmDelivery);
@@ -297,7 +322,14 @@ describe('RoundWorkflow', () => {
       body: 'wrong debate',
     });
     assert.throws(
-      () => workflow.dispatch(round1.id, otherDebateBrief),
+      () =>
+        workflow.dispatch(
+          round1.id,
+          createDispatchIntent({
+            message: otherDebateBrief,
+            referencedMessageIds: [],
+          }),
+        ),
       OrchestratorError,
     );
 
@@ -311,7 +343,14 @@ describe('RoundWorkflow', () => {
       body: 'wrong round',
     });
     assert.throws(
-      () => workflow.dispatch(round1.id, wrongRoundBrief),
+      () =>
+        workflow.dispatch(
+          round1.id,
+          createDispatchIntent({
+            message: wrongRoundBrief,
+            referencedMessageIds: [],
+          }),
+        ),
       OrchestratorError,
     );
 
@@ -325,7 +364,14 @@ describe('RoundWorkflow', () => {
       body: 'Coder is not a participant',
     });
     assert.throws(
-      () => workflow.dispatch(round1.id, coderBrief),
+      () =>
+        workflow.dispatch(
+          round1.id,
+          createDispatchIntent({
+            message: coderBrief,
+            referencedMessageIds: [],
+          }),
+        ),
       OrchestratorError,
     );
 
@@ -338,7 +384,13 @@ describe('RoundWorkflow', () => {
       kind: 'brief',
       body: 'GLOBAL ROUND 1 MESSAGE',
     });
-    const deliveries = workflow.dispatch(round1.id, brief);
+    const deliveries = workflow.dispatch(
+      round1.id,
+      createDispatchIntent({
+        message: brief,
+        referencedMessageIds: [],
+      }),
+    );
     const qwenDelivery = deliveries.find((d) => d.recipientId === qwen.id);
     assert.ok(qwenDelivery);
 
@@ -363,6 +415,160 @@ describe('RoundWorkflow', () => {
           body: 'Coder cannot answer for Qwen',
         }),
       Error,
+    );
+  });
+
+  it('materializes Coordinator-declared references only after confirmed delivery', () => {
+    const {
+      workflow,
+      exposures,
+      rounds,
+      coordinator,
+      qwen,
+      deepSeek,
+      glm,
+      debate,
+      round1,
+    } = setup();
+
+    workflow.startRound({
+      roundId: round1.id,
+      participantIds: [qwen.id, deepSeek.id, glm.id],
+    });
+
+    const r1Deliveries = workflow.dispatch(
+      round1.id,
+      createDispatchIntent({
+        message: createMessageEnvelope({
+          id: 'msg-brief-r1',
+          debateId: debate.id,
+          roundId: round1.id,
+          senderId: coordinator.id,
+          recipientIds: [qwen.id, deepSeek.id, glm.id],
+          kind: 'brief',
+          body: 'GLOBAL ROUND 1 MESSAGE',
+        }),
+        referencedMessageIds: [],
+      }),
+    );
+
+    const qwenR1 = r1Deliveries.find((d) => d.recipientId === qwen.id);
+    const deepSeekR1 = r1Deliveries.find((d) => d.recipientId === deepSeek.id);
+    const glmR1 = r1Deliveries.find((d) => d.recipientId === glm.id);
+    assert.ok(qwenR1);
+    assert.ok(deepSeekR1);
+    assert.ok(glmR1);
+
+    workflow.confirmDelivery(round1.id, qwenR1.id);
+    workflow.confirmDelivery(round1.id, deepSeekR1.id);
+    workflow.confirmDelivery(round1.id, glmR1.id);
+
+    const qwenResponse = workflow.submitResponse(round1.id, {
+      deliveryId: qwenR1.id,
+      responderId: qwen.id,
+      body: 'Qwen analysis',
+    }).message;
+    const deepSeekResponse = workflow.submitResponse(round1.id, {
+      deliveryId: deepSeekR1.id,
+      responderId: deepSeek.id,
+      body: 'DeepSeek analysis',
+    }).message;
+    const glmResponse = workflow.submitResponse(round1.id, {
+      deliveryId: glmR1.id,
+      responderId: glm.id,
+      body: 'GLM analysis',
+    }).message;
+
+    workflow.completeRound(round1.id);
+
+    const round2 = rounds.create(
+      createRound({ id: 'round-2', debateId: debate.id, number: 2 }),
+    );
+    workflow.startRound({
+      roundId: round2.id,
+      participantIds: [qwen.id, deepSeek.id, glm.id],
+    });
+
+    const deepSeekPrompt = createMessageEnvelope({
+      id: 'msg-r2-deepseek',
+      debateId: debate.id,
+      roundId: round2.id,
+      senderId: coordinator.id,
+      recipientIds: [deepSeek.id],
+      kind: 'brief',
+      body: 'ROUND 2 MESSAGE FOR DEEPSEEK',
+    });
+    const qwenPrompt = createMessageEnvelope({
+      id: 'msg-r2-qwen',
+      debateId: debate.id,
+      roundId: round2.id,
+      senderId: coordinator.id,
+      recipientIds: [qwen.id],
+      kind: 'brief',
+      body: 'ROUND 2 MESSAGE FOR QWEN',
+    });
+    const glmPrompt = createMessageEnvelope({
+      id: 'msg-r2-glm',
+      debateId: debate.id,
+      roundId: round2.id,
+      senderId: coordinator.id,
+      recipientIds: [glm.id],
+      kind: 'brief',
+      body: 'ROUND 2 MESSAGE FOR GLM',
+    });
+
+    const [deepSeekR2] = workflow.dispatch(
+      round2.id,
+      createDispatchIntent({
+        message: deepSeekPrompt,
+        referencedMessageIds: [qwenResponse.id, glmResponse.id],
+      }),
+    );
+    const [qwenR2] = workflow.dispatch(
+      round2.id,
+      createDispatchIntent({
+        message: qwenPrompt,
+        referencedMessageIds: [deepSeekResponse.id, glmResponse.id],
+      }),
+    );
+    const [glmR2] = workflow.dispatch(
+      round2.id,
+      createDispatchIntent({
+        message: glmPrompt,
+        referencedMessageIds: [qwenResponse.id, deepSeekResponse.id],
+      }),
+    );
+    assert.ok(deepSeekR2);
+    assert.ok(qwenR2);
+    assert.ok(glmR2);
+
+    assert.deepEqual(exposures.listByAgentInRound(deepSeek.id, round2.id), []);
+    assert.deepEqual(exposures.listByAgentInRound(qwen.id, round2.id), []);
+    assert.deepEqual(exposures.listByAgentInRound(glm.id, round2.id), []);
+
+    workflow.confirmDelivery(round2.id, deepSeekR2.id);
+    const deepSeekExposure = exposures.listByAgentInRound(
+      deepSeek.id,
+      round2.id,
+    )[0];
+    assert.ok(deepSeekExposure);
+    assert.equal(deepSeekExposure.messageId, deepSeekPrompt.id);
+    assert.deepEqual(deepSeekExposure.referencedMessageIds, [
+      qwenResponse.id,
+      glmResponse.id,
+    ]);
+    assert.deepEqual(exposures.listByAgentInRound(qwen.id, round2.id), []);
+    assert.deepEqual(exposures.listByAgentInRound(glm.id, round2.id), []);
+
+    workflow.confirmDelivery(round2.id, qwenR2.id);
+    workflow.confirmDelivery(round2.id, glmR2.id);
+    assert.deepEqual(
+      exposures.listByAgentInRound(qwen.id, round2.id)[0]?.referencedMessageIds,
+      [deepSeekResponse.id, glmResponse.id],
+    );
+    assert.deepEqual(
+      exposures.listByAgentInRound(glm.id, round2.id)[0]?.referencedMessageIds,
+      [qwenResponse.id, deepSeekResponse.id],
     );
   });
 });

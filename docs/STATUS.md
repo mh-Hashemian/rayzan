@@ -11,10 +11,11 @@ Completed:
 - `@rayzan/transport` abstraction, ManualTransport, and delivery lifecycle
 - `@rayzan/orchestrator` dispatch, confirm-delivery/exposure, and response storage
 - Mechanical round execution (`RoundWorkflow`)
+- `DispatchIntent` exposure metadata declared at dispatch
 
 Currently being worked on:
 
-- Nothing. Phase 2B round execution tracking is complete.
+- Nothing. Phase 2C dispatch intent is complete.
 
 Next:
 

@@ -5,7 +5,6 @@ import {
   type AgentRegistry,
   type DebateId,
   type DebateStore,
-  type MessageEnvelope,
   type RoundStatus,
   type RoundStore,
 } from '@rayzan/protocol';
@@ -16,6 +15,7 @@ import type {
   SubmitResponseInput,
 } from '@rayzan/transport';
 
+import type { DispatchIntent } from './dispatch-intent.js';
 import { OrchestratorError } from './error.js';
 import type { Orchestrator } from './orchestrator.js';
 
@@ -114,9 +114,10 @@ export class RoundWorkflow {
 
   dispatch(
     roundId: string,
-    message: MessageEnvelope,
+    intent: DispatchIntent,
   ): readonly OutboundDelivery[] {
     const execution = this.#requireOpenExecution(roundId);
+    const message = intent.message;
 
     if (message.debateId !== execution.debateId) {
       throw new OrchestratorError(
@@ -139,7 +140,7 @@ export class RoundWorkflow {
       }
     }
 
-    const deliveries = this.orchestrator.dispatch(message);
+    const deliveries = this.orchestrator.dispatch(intent);
     execution.deliveries.push(
       ...deliveries.map((delivery) => ({
         id: delivery.id,

@@ -31,6 +31,7 @@
 - [x] Support Round 1 broadcast as isolated per-Watcher messages
 - [x] Collect attributed Watcher responses
 - [x] Support personalized Round 2 messages
+- [x] Declare exposure references at dispatch and materialize them on confirm
 - [ ] Support Coordinator routing
 - [ ] Support additional rounds
 - [ ] Support adding fresh Watchers during a debate

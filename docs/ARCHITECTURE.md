@@ -20,6 +20,16 @@ rayzan/
 
 `packages/orchestrator` (`@rayzan/orchestrator`) depends on protocol and transport. Low-level `Orchestrator` is constructed with injected store and transport contracts. It stores canonical messages, asks transport to send and confirm them, records exposure after `delivered`, and stores accepted inbound responses.
 
+Dispatch is expressed as `DispatchIntent`: a `MessageEnvelope` plus `referencedMessageIds`. Those IDs are structural declarations from Coordinator, not a result of reading message text.
+
+```text
+MessageEnvelope   — the protocol message itself
+DispatchIntent    — message + intended structural exposure metadata
+ExposureRecord    — what was actually exposed after confirmed delivery
+```
+
+References are attached to each per-recipient delivery at dispatch and materialized on the ExposureRecord only after `confirmDelivery`. Transport does not store or interpret them.
+
 `RoundWorkflow` tracks mechanical state for one round: who is expected to respond, which deliveries belong to the round, and whether those responses have arrived. Coordinator chooses participants and content. Orchestrator does not decide when another round is needed or whether the debate has converged. All-responses-received is not convergence. A new round is never created automatically.
 
 Protocol `Round` status is reused as:

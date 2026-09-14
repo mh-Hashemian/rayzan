@@ -263,3 +263,13 @@ Decision:
 
 Reason:
 Rayzan needs to know who is still waiting without taking semantic authority from the Coordinator.
+
+## DEC-027 — Exposure references are declared at dispatch
+
+Status: Accepted
+
+Decision:
+`referencedMessageIds` are declared on `DispatchIntent` at dispatch time, not on `confirmDelivery` and not on `MessageEnvelope`. Dispatch is the intended exposure. Confirm delivery is whether that intended exposure happened. Metadata is kept in memory per delivery inside the orchestrator. After `markDelivered` succeeds, Orchestrator copies those IDs onto the ExposureRecord. Duplicate, unknown, or cross-debate references are rejected. A reference is Coordinator's explicit declaration, not a claim that Rayzan inspected message text.
+
+Reason:
+Coordinator already knows which prior messages a Round 2 prompt draws from before anyone is delivered. Confirming delivery should not invent or restate that semantic metadata.
