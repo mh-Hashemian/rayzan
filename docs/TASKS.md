@@ -56,6 +56,7 @@
 ## Phase 3C — Product UI
 
 - [x] Rayzan Desktop foundation (3C.1 — Electron shell, shared runtime bootstrap, React status screen)
+- [x] Debate history and single active debate (3C.1.1)
 - [ ] Agent and browser workspace (3C.2)
 - [ ] Debate Observatory
 - [ ] Operator intervention

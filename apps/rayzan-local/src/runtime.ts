@@ -13,6 +13,8 @@ import {
   createDebate,
   createDebateSynthesis,
   createRound,
+  isOpenDebateStatus,
+  withDebateStatus,
   InMemoryAgentRegistry,
   InMemoryDebateStore,
   InMemoryExposureLedgerStore,
@@ -22,6 +24,7 @@ import {
   type Agent,
   type AgentId,
   type AgentRole,
+  type Debate,
   type Round,
 } from '@rayzan/protocol';
 import { InMemoryEventStore } from '@rayzan/storage';
@@ -99,15 +102,21 @@ export interface AgentPresence {
   readonly capture?: BrowserCaptureState;
 }
 
+export interface DebateView {
+  readonly id: string;
+  readonly topic: string;
+  readonly status: string;
+  readonly createdAt?: string;
+  readonly completedAt?: string;
+}
+
 export interface RayzanSnapshot {
   readonly bridge: 'connected';
   readonly sessionStarted: boolean;
   readonly restoredFromHistory: boolean;
-  readonly debate?: {
-    readonly id: string;
-    readonly topic: string;
-    readonly status: string;
-  };
+  readonly debate?: DebateView;
+  readonly activeDebate?: DebateView;
+  readonly debateHistory: readonly DebateView[];
   readonly round?: {
     readonly id: string;
     readonly number: number;
@@ -243,6 +252,7 @@ export class RayzanRuntime {
   #parsedChallenges: readonly WatcherChallenge[] | undefined;
   #replayResult: ReplayResult = emptyReplayResult();
   #restoredFromHistory = false;
+  #freezeRestoredSideEffects = false;
   #presence = new Map<string, AgentPresence>();
   #bindings = new Map<
     string,
@@ -310,14 +320,7 @@ export class RayzanRuntime {
    * browser deliveries.
    */
   createRound1(problem: string): void {
-    if (this.#restoredFromHistory) {
-      throw new Error(
-        'A debate was restored from event history. Replay does not resend prompts or resume capture. Park apps/rayzan-local/data/rayzan.sqlite and start Rayzan with a fresh database to run a new live debate.',
-      );
-    }
-    if (this.#started) {
-      throw new Error('Round 1 already started');
-    }
+    this.#assertNoOpenDebate();
     const trimmed = problem.trim();
     if (trimmed.length === 0) {
       throw new Error('problem cannot be empty');
@@ -330,17 +333,19 @@ export class RayzanRuntime {
 
     const debateId = this.#nextId('debate');
     const roundId = this.#nextId('round');
+    const createdAt = new Date().toISOString();
     this.debates.create(
       createDebate({
         id: debateId,
         topic: trimmed,
         status: 'active',
+        createdAt,
       }),
     );
     const debateEvent = this.#emit('DEBATE_CREATED', {
       debateId,
       correlationId: `debate:${debateId}`,
-      payload: { topic: trimmed, status: 'active' },
+      payload: { topic: trimmed, status: 'active', createdAt },
     });
     this.rounds.create(
       createRound({
@@ -363,6 +368,7 @@ export class RayzanRuntime {
       roundId,
       participantIds: watchers.map((watcher) => watcher.id),
     });
+    this.#freezeRestoredSideEffects = false;
     this.#started = true;
     this.#record(
       `Round 1 bootstrapped with watchers ${watchers.map((w) => w.name).join(', ')} (not start-round).`,
@@ -374,16 +380,20 @@ export class RayzanRuntime {
    * dispatch the same Round 1 brief. Coordinator is the sender of that brief.
    */
   runLiveRound1(problem: string): void {
-    if (this.#coordinatorBriefSent) {
-      throw new Error('Coordinator Round 1 prompt already queued');
-    }
-    if (this.#restoredFromHistory) {
+    const open = this.#activeDebate();
+    if (
+      open !== undefined &&
+      (this.#coordinatorBriefSent || this.#freezeRestoredSideEffects)
+    ) {
       throw new Error(
-        'A debate was restored from event history. Replay does not resend prompts or resume capture. Park apps/rayzan-local/data/rayzan.sqlite and start Rayzan with a fresh database to run a new live debate.',
+        `An active debate already exists (${open.id}). Resume it, or end/archive it before starting a new debate.`,
       );
     }
-    if (!this.#started) {
+    if (open === undefined) {
       this.createRound1(problem);
+    }
+    if (this.#coordinatorBriefSent) {
+      throw new Error('Coordinator Round 1 prompt already queued');
     }
     const watchers = this.agents.listByRole('watcher');
     if (watchers.length < 2) {
@@ -520,7 +530,7 @@ export class RayzanRuntime {
       this.#lastError = `${agent.name}: ${error}`;
     }
     if (
-      !this.#restoredFromHistory &&
+      !this.#freezeRestoredSideEffects &&
       capture?.phase === 'failed' &&
       capture.deliveryId
     ) {
@@ -642,7 +652,11 @@ export class RayzanRuntime {
   }
 
   snapshot(): RayzanSnapshot {
-    const debateRecord = this.debates.list()[0];
+    const debateRecord = this.#focusDebate();
+    const activeDebate = this.#activeDebate();
+    const debateHistory = this.#historyDebates().map((debate) =>
+      this.#debateView(debate),
+    );
     const round1 = this.#roundByNumber(1);
     const round2 = this.#roundByNumber(2);
     let roundProgress;
@@ -671,15 +685,9 @@ export class RayzanRuntime {
       bridge: 'connected',
       sessionStarted: this.#started,
       restoredFromHistory: this.#restoredFromHistory,
-      ...(debateRecord
-        ? {
-            debate: {
-              id: debateRecord.id,
-              topic: debateRecord.topic,
-              status: debateRecord.status,
-            },
-          }
-        : {}),
+      debateHistory,
+      ...(debateRecord ? { debate: this.#debateView(debateRecord) } : {}),
+      ...(activeDebate ? { activeDebate: this.#debateView(activeDebate) } : {}),
       ...(round1
         ? {
             round: {
@@ -1108,12 +1116,11 @@ export class RayzanRuntime {
         },
       });
       this.debates.update(
-        createDebate({
-          id: debate.id,
-          topic: debate.topic,
-          status: 'completed',
+        withDebateStatus(debate, 'completed', {
+          completedAt: synthesis.createdAt,
         }),
       );
+      this.#syncLogicalFlags();
       this.#lastError = undefined;
       this.#record('Coordinator final synthesis stored.');
     } catch (error) {
@@ -1134,7 +1141,7 @@ export class RayzanRuntime {
   #watcherResponsesForRound(
     number: number,
   ): readonly AttributedWatcherResponse[] {
-    const debate = this.debates.list()[0];
+    const debate = this.#focusDebate();
     const round = this.#roundByNumber(number);
     if (debate === undefined || round === undefined) {
       return [];
@@ -1162,7 +1169,7 @@ export class RayzanRuntime {
   }
 
   #synthesisRecord(): RayzanSnapshot['synthesis'] {
-    const debate = this.debates.list()[0];
+    const debate = this.#focusDebate();
     if (debate === undefined) {
       return undefined;
     }
@@ -1179,7 +1186,7 @@ export class RayzanRuntime {
   }
 
   #round2Messages(): readonly { name: string; body: string }[] {
-    const debate = this.debates.list()[0];
+    const debate = this.#focusDebate();
     const round2 = this.#roundByNumber(2);
     if (debate === undefined || round2 === undefined) {
       return [];
@@ -1400,7 +1407,7 @@ export class RayzanRuntime {
   }
 
   #coordinatorRound1Brief(): string | undefined {
-    const debate = this.debates.list()[0];
+    const debate = this.#focusDebate();
     const coordinator = this.agents.listByRole('coordinator')[0];
     if (debate === undefined || coordinator === undefined) {
       return undefined;
@@ -1477,7 +1484,7 @@ export class RayzanRuntime {
   }
 
   #latestResponseFrom(agentId: AgentId): string | undefined {
-    const debate = this.debates.list()[0];
+    const debate = this.#focusDebate();
     if (debate === undefined) {
       return undefined;
     }
@@ -1521,6 +1528,25 @@ export class RayzanRuntime {
     return coordinators[0]!;
   }
 
+  archiveActiveDebate(): Debate {
+    const debate = this.#requireActiveDebate();
+    const updated = withDebateStatus(debate, 'archived');
+    this.debates.update(updated);
+    this.#emit('DEBATE_ARCHIVED', {
+      debateId: debate.id,
+      correlationId: `debate:${debate.id}`,
+      payload: { previousStatus: debate.status, status: 'archived' },
+    });
+    this.#freezeRestoredSideEffects = false;
+    this.#syncLogicalFlags();
+    this.#record(`Debate ${debate.id} archived.`);
+    return updated;
+  }
+
+  endActiveDebate(): Debate {
+    return this.archiveActiveDebate();
+  }
+
   #requireStarted(): void {
     if (!this.#started) {
       throw new Error('start Round 1 first');
@@ -1536,15 +1562,56 @@ export class RayzanRuntime {
   }
 
   #debate() {
-    const debate = this.debates.list()[0];
+    return this.#requireActiveDebate();
+  }
+
+  #activeDebate(): Debate | undefined {
+    return this.debates
+      .list()
+      .find((debate) => isOpenDebateStatus(debate.status));
+  }
+
+  #historyDebates(): readonly Debate[] {
+    return this.debates
+      .list()
+      .filter((debate) => !isOpenDebateStatus(debate.status));
+  }
+
+  #focusDebate(): Debate | undefined {
+    return this.#activeDebate() ?? this.#historyDebates().at(-1);
+  }
+
+  #requireActiveDebate(): Debate {
+    const debate = this.#activeDebate();
     if (debate === undefined) {
-      throw new Error('debate missing');
+      throw new Error('no active debate');
     }
     return debate;
   }
 
+  #assertNoOpenDebate(): void {
+    const open = this.#activeDebate();
+    if (open !== undefined) {
+      throw new Error(
+        `An active debate already exists (${open.id}). Resume it, or end/archive it before starting a new debate.`,
+      );
+    }
+  }
+
+  #debateView(debate: Debate): DebateView {
+    return {
+      id: debate.id,
+      topic: debate.topic,
+      status: debate.status,
+      ...(debate.createdAt !== undefined ? { createdAt: debate.createdAt } : {}),
+      ...(debate.completedAt !== undefined
+        ? { completedAt: debate.completedAt }
+        : {}),
+    };
+  }
+
   #roundByNumber(number: number): Round | undefined {
-    const debate = this.debates.list()[0];
+    const debate = this.#focusDebate();
     if (debate === undefined) {
       return undefined;
     }
@@ -1686,6 +1753,7 @@ export class RayzanRuntime {
     this.#syncLogicalFlags();
     this.#bumpSeqFromRestoredIds();
     this.#restoredFromHistory = this.debates.list().length > 0;
+    this.#freezeRestoredSideEffects = this.#activeDebate() !== undefined;
     if (this.agents.getById(asAgentId(OPERATOR_ID)) === undefined) {
       this.agents.register(
         createAgent({
@@ -1713,7 +1781,7 @@ export class RayzanRuntime {
   }
 
   #syncLogicalFlags(): void {
-    const debate = this.debates.list()[0];
+    const debate = this.#activeDebate();
     this.#started = debate !== undefined;
     const round1 = this.#roundByNumber(1);
     const round2 = this.#roundByNumber(2);
@@ -1754,15 +1822,14 @@ export class RayzanRuntime {
   }
 
   #bumpSeqFromRestoredIds(): void {
-    const debate = this.debates.list()[0];
     const ids = [
       ...this.debates.list().map((item) => item.id),
-      ...(debate
-        ? this.rounds.listByDebate(debate.id).map((round) => round.id)
-        : []),
-      ...(debate
-        ? this.messages.listByDebate(debate.id).map((message) => message.id)
-        : []),
+      ...this.debates.list().flatMap((debate) =>
+        this.rounds.listByDebate(debate.id).map((round) => round.id),
+      ),
+      ...this.debates.list().flatMap((debate) =>
+        this.messages.listByDebate(debate.id).map((message) => message.id),
+      ),
       ...this.transport.listAll().map((delivery) => delivery.id),
     ];
     for (const id of ids) {

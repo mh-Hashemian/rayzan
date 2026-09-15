@@ -244,7 +244,7 @@ describe('RayzanRuntime event replay', () => {
       assert.equal(after.debate?.topic, 'Restored debate must not resend');
       assert.throws(
         () => runtimeB.runLiveRound1('Restored debate must not resend'),
-        /restored from event history/,
+        /active debate already exists/,
       );
       assert.equal(storeB.listAll().length, eventCount);
       assert.equal(runtimeB.nextPendingForAgent(coordinator.id), undefined);

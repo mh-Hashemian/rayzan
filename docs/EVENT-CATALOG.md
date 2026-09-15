@@ -14,7 +14,8 @@ External side effects use request → terminal (`confirmed` or `failed`). A `REQ
 | Event | Purpose | Schema | Canonical payload | Causation | Correlation | Replay effect | External |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `AGENT_REGISTERED` | Record an agent | 1 | `id`, `name`, `role` | none | `agent:{id}` | register agent | no |
-| `DEBATE_CREATED` | Record a debate | 1 | `topic`, `status` | none | `debate:{id}` | create debate | no |
+| `DEBATE_CREATED` | Record a debate | 1 | `topic`, `status`, `createdAt` | none | `debate:{id}` | create debate | no |
+| `DEBATE_ARCHIVED` | Close an open debate into history without deleting events | 1 | `previousStatus`, `status: archived` | debate create or later lifecycle | `debate:{id}` | set debate archived | no |
 | `ROUND_CREATED` | Record a round | 1 | `number`, `participantIds` | debate or previous round completion | `round:{id}` | create round; restore execution when `participantIds` present | no |
 | `MESSAGE_CREATED` | Store a canonical message | 1 | `messageId`, `senderId`, `recipientIds`, `kind`, `body` | prior dispatch or `CAPTURE_REQUESTED` for responses | `message:{id}` or `delivery:{id}` | store + hydrate message | no |
 | `MESSAGE_DISPATCHED` | Record that transport.send ran | 1 | `messageId`, `senderId`, `recipientIds`, `kind`, `deliveryIds` | `MESSAGE_CREATED` | `message:{id}` | none (bookkeeping) | no |

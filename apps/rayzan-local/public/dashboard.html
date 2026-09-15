@@ -87,6 +87,8 @@ Should Rayzan use SQLite or PostgreSQL for its future persistent local state?</t
       <p id="round-create-hint"></p>
       <button id="create-round">Create Round 1</button>
       <button id="run-live">Start live debate</button>
+      <button id="archive-debate">End / Archive debate</button>
+      <pre id="debate-history">(no history)</pre>
     </section>
     <section>
       <h2>Final Coordinator Report</h2>
@@ -442,18 +444,33 @@ Exposures:
           ? agents.map((a) => `${a.name}    ${a.role}`).join('\n')
           : '(none)';
         const restored = Boolean(state.restoredFromHistory);
+        const openDebate = Boolean(
+          state.activeDebate ||
+            (state.debate &&
+              (state.debate.status === 'pending' ||
+                state.debate.status === 'active')),
+        );
         const canCreate =
-          Boolean(coordinator) && watchers.length >= 1 && !restored;
+          Boolean(coordinator) && watchers.length >= 1 && !openDebate;
         const coordinatorCount = agents.filter(
           (a) => a.role === 'coordinator',
         ).length;
-        $('round-create-hint').textContent = restored
-          ? 'A debate was restored from event history. Replay does not resend prompts or resume capture. Park apps/rayzan-local/data/rayzan.sqlite and start Rayzan with a fresh database to run a new live debate.'
+        $('round-create-hint').textContent = openDebate
+          ? 'An active debate is in progress. Resume it here, or End/Archive it before starting a new debate. Replay does not resend prompts.'
           : canCreate
-            ? ''
+            ? restored
+              ? 'Previous debates are in history. Start New Debate is allowed.'
+              : ''
             : `Need 1 coordinator and at least 1 watcher. Currently: ${coordinatorCount} coordinator, ${watchers.length} watcher.`;
         $('create-round').disabled = !canCreate;
         $('run-live').disabled = !canCreate;
+        $('archive-debate').disabled = !openDebate;
+        const history = state.debateHistory || [];
+        $('debate-history').textContent = history.length
+          ? history
+              .map((item) => `${item.id}    ${item.status}    ${item.topic}`)
+              .join('\n')
+          : '(no history)';
 
         if (!state.debate) {
           $('round-status').textContent =
@@ -692,6 +709,16 @@ Exposures:
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ problem: $('problem').value }),
             }),
+          );
+        } catch (error) {
+          $('error').textContent = error.message;
+          await refresh();
+        }
+      };
+      $('archive-debate').onclick = async () => {
+        try {
+          applyState(
+            await api('/api/session/archive-debate', { method: 'POST' }),
           );
         } catch (error) {
           $('error').textContent = error.message;

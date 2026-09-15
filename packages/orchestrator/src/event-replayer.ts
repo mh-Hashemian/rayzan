@@ -11,6 +11,7 @@ import {
   createMessageEnvelope,
   createRound,
   DEBATE_STATUSES,
+  withDebateStatus,
   MESSAGE_KINDS,
   type Agent,
   type AgentRole,
@@ -248,6 +249,8 @@ export class EventReplayer {
           return this.#agentRegistered(event, target);
         case 'DEBATE_CREATED':
           return this.#debateCreated(event, target);
+        case 'DEBATE_ARCHIVED':
+          return this.#debateArchived(event, target);
         case 'ROUND_CREATED':
           return this.#roundCreated(event, target);
         case 'MESSAGE_CREATED':
@@ -325,8 +328,27 @@ export class EventReplayer {
     if (target.getDebate(id) !== undefined) {
       return integrity(`duplicate debate id: ${id}`);
     }
-    target.createDebate(createDebate({ id, topic, status: statusValue }));
+    const createdAt =
+      stringField(payload, 'createdAt') ?? event.timestamp.toISOString();
+    target.createDebate(
+      createDebate({ id, topic, status: statusValue, createdAt }),
+    );
     return { kind: 'applied', debates: 1 };
+  }
+
+  #debateArchived(event: Event, target: ReplayTarget): ApplyOutcome {
+    const debateId = event.debateId;
+    if (debateId === undefined) {
+      return historical('DEBATE_ARCHIVED lacks debate id');
+    }
+    const debate = target.getDebate(debateId);
+    if (debate === undefined) {
+      return integrity(`DEBATE_ARCHIVED references unknown debate: ${debateId}`);
+    }
+    if (debate.status !== 'archived') {
+      target.updateDebate(withDebateStatus(debate, 'archived'));
+    }
+    return { kind: 'applied' };
   }
 
   #roundCreated(event: Event, target: ReplayTarget): ApplyOutcome {
@@ -575,10 +597,8 @@ export class EventReplayer {
     const debate = target.getDebate(debateId);
     if (debate !== undefined && debate.status !== 'completed') {
       target.updateDebate(
-        createDebate({
-          id: debate.id,
-          topic: debate.topic,
-          status: 'completed',
+        withDebateStatus(debate, 'completed', {
+          completedAt: createdAt,
         }),
       );
     }

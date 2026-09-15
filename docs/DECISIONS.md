@@ -486,7 +486,7 @@ Reasons:
 Status: Accepted
 
 Decision:
-Runtime state is reconstructed by deterministic replay of the append-only event log. Persistent events are the durable history. In-memory protocol stores are runtime projections. `EventReplayer` applies `SqliteEventStore.listAll()` (sequence order, never timestamp order) onto fresh AgentRegistry, DebateStore, RoundStore, MessageStore, ExposureLedger, DebateSynthesis, and a frozen delivery projection. Replay mutates state only; it does not append events and does not trigger browser/HTTP/capture side effects. Replay restores known state. Replay does not automatically resume interrupted browser deliveries. After a debate is restored, Start live debate and Create Round 1 are refused so Rayzan cannot inject a second Coordinator Round 1 prompt into an existing chatbot thread.
+Runtime state is reconstructed by deterministic replay of the append-only event log. Persistent events are the durable history. In-memory protocol stores are runtime projections. `EventReplayer` applies `SqliteEventStore.listAll()` (sequence order, never timestamp order) onto fresh AgentRegistry, DebateStore, RoundStore, MessageStore, ExposureLedger, DebateSynthesis, and a frozen delivery projection. Replay mutates state only; it does not append events and does not trigger browser/HTTP/capture side effects. Replay restores known state. Replay does not automatically resume interrupted browser deliveries. An incomplete restored debate remains the single active debate; Start live debate is refused so Rayzan cannot inject a second Coordinator Round 1 prompt into that thread. Completed and archived debates stay in history and do not block a new debate (DEC-052).
 
 Reason:
 Crash recovery must reproduce the same logical Rayzan state from the same event stream without duplicating prompts or inventing missing historical fields.
@@ -520,5 +520,15 @@ Rayzan Desktop is an Electron + React + Vite product shell around the existing N
 
 Reason:
 The Operator should launch Rayzan like an application while the debate engine, event log, and browser-extension bridge stay one runtime.
+
+## DEC-052 — Rayzan preserves debate history and permits at most one active debate
+
+Status: Accepted
+
+Decision:
+Rayzan preserves multiple debates historically but permits at most one active debate in the current MVP. Debate status is `pending`, `active`, `completed`, or `archived`. `completed` means the workflow reached its normal end (`SYNTHESIS_CREATED`). `archived` means the Operator explicitly ended an open debate; events are retained. Start New Debate is refused only while a `pending` or `active` debate exists. A new debate always receives a new id and appends new events. `DEBATE_ARCHIVED` is the archive lifecycle event. Replay reconstructs the same statuses. Resume of an incomplete debate is continuing that active debate, not starting another.
+
+Reason:
+Restored completed debates must not block future work, and wiping SQLite or deleting history is not an acceptable way to start again.
 
 

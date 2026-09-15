@@ -1,3 +1,11 @@
+export interface DebateView {
+  readonly id: string;
+  readonly topic: string;
+  readonly status: string;
+  readonly createdAt?: string;
+  readonly completedAt?: string;
+}
+
 export interface RayzanDesktopStatus {
   readonly runtime: 'ready';
   readonly database: 'connected' | 'memory';
@@ -10,10 +18,8 @@ export interface RayzanDesktopStatus {
   };
   readonly agents: number;
   readonly browserBridge: 'ready';
-  readonly activeDebate: {
-    readonly id: string;
-    readonly topic: string;
-  } | null;
+  readonly activeDebate: DebateView | null;
+  readonly debateHistory: readonly DebateView[];
 }
 
 const STATUS_URL = 'http://127.0.0.1:8787/api/status';

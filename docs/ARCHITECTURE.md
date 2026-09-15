@@ -33,7 +33,7 @@ Current production CLI (`pnpm start:local`): append-only `SqliteEventStore` at `
 
 The event envelope is versioned (`schemaVersion`). Newly emitted events use `schemaVersion = 1`. Historical rows from before 3B.4 are read as legacy (`schemaVersion = 0`) without rewriting stored JSON. Optional `causationEventId` is a direct causal edge to an earlier event. Optional `correlationId` groups one logical operation. SQLite `sequence` is storage order, not domain causality. Causation is validated at append: the cause must already exist (so it is earlier in sequence), must not be the same event, and must not belong to a different debate. Cycles are impossible because a cause can only point backward.
 
-Checkpoint 3B.3 reconstructs in-memory protocol stores by replaying that sequence. Persistent events are the durable history. In-memory stores are runtime projections. There are no `agents` / `debates` / `messages` SQLite tables. Replay performs no browser send, HTTP send, or capture. Interrupted deliveries are restored as frozen unresolved jobs; the Operator must not expect automatic resend. Start live debate and Create Round 1 are refused when a debate was restored so Rayzan cannot inject a second Coordinator prompt into an existing chatbot thread. A new live debate requires a fresh SQLite file.
+Checkpoint 3B.3 reconstructs in-memory protocol stores by replaying that sequence. Persistent events are the durable history. In-memory stores are runtime projections. There are no `agents` / `debates` / `messages` SQLite tables. Replay performs no browser send, HTTP send, or capture. Interrupted deliveries are restored as frozen unresolved jobs; the Operator must not expect automatic resend. Rayzan preserves multiple debates historically but permits at most one active debate. A completed or archived debate does not block a new debate. An incomplete restored debate remains the active debate until the Operator ends or archives it. Start live debate does not resend Coordinator Round 1 into that existing thread.
 
 External browser actions use request/confirmed/failed lifecycle events (`PROMPT_DISPATCH_*`, `CAPTURE_REQUESTED`, `RESPONSE_CAPTURED`, `CAPTURE_FAILED`). After replay, a request without a later terminal is `IN_DOUBT`. Replay never retries those actions.
 
@@ -276,7 +276,7 @@ The Orchestrator does not replace a provider's own conversation store. It record
 
 The exposure ledger records protocol-visible exposure through Rayzan as structural references to messages. It does not claim to know provider memory, custom instructions, old thread history, system prompts, or model-internal state.
 
-A Debate tracks identity, topic, and status. Message history belongs in dedicated stores, not inside the Debate object.
+A Debate tracks identity, topic, and status (`pending`, `active`, `completed`, `archived`). Message history belongs in dedicated stores, not inside the Debate object. Completed and archived debates remain in history. At most one debate may be `pending` or `active`.
 
 A Round is protocol state (`pending`, `active`, `collecting`, `completed`), not a provider conversation.
 

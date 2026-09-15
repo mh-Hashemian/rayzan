@@ -1,4 +1,4 @@
-import type { RayzanRuntime } from './runtime.js';
+import type { DebateView, RayzanRuntime } from './runtime.js';
 
 export interface RayzanDesktopStatus {
   readonly runtime: 'ready';
@@ -12,10 +12,8 @@ export interface RayzanDesktopStatus {
   };
   readonly agents: number;
   readonly browserBridge: 'ready';
-  readonly activeDebate: {
-    readonly id: string;
-    readonly topic: string;
-  } | null;
+  readonly activeDebate: DebateView | null;
+  readonly debateHistory: readonly DebateView[];
 }
 
 export function desktopStatus(
@@ -44,8 +42,7 @@ export function desktopStatus(
     },
     agents: agents.length,
     browserBridge: 'ready',
-    activeDebate: snapshot.debate
-      ? { id: snapshot.debate.id, topic: snapshot.debate.topic }
-      : null,
+    activeDebate: snapshot.activeDebate ?? null,
+    debateHistory: snapshot.debateHistory,
   };
 }

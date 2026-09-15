@@ -167,6 +167,15 @@ export async function handleBridgeRequest(
       write(response, 200, runtime.snapshot());
       return true;
     }
+    if (
+      request.method === 'POST' &&
+      (url.pathname === '/api/session/archive-debate' ||
+        url.pathname === '/api/session/end-debate')
+    ) {
+      runtime.archiveActiveDebate();
+      write(response, 200, runtime.snapshot());
+      return true;
+    }
 
     const ackMatch = /^\/api\/deliveries\/([^/]+)\/ack$/.exec(url.pathname);
     if (request.method === 'POST' && ackMatch) {

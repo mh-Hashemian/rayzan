@@ -33,6 +33,7 @@ describe('desktop status API', () => {
     assert.equal(status.recovery.status, 'fresh');
     assert.equal(status.agents, 0);
     assert.equal(status.activeDebate, null);
+    assert.deepEqual(status.debateHistory, []);
   });
 });
 

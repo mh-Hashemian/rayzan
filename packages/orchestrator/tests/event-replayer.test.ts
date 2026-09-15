@@ -460,4 +460,20 @@ describe('EventReplayer', () => {
     assert.equal(result.unresolvedDeliveries, 1);
     assert.equal(result.status, 'RESTORED_WITH_WARNINGS');
   });
+
+  it('replays DEBATE_ARCHIVED onto the debate projection', () => {
+    const { debates, target } = harness();
+    new EventReplayer().replay(
+      [
+        ...bootstrap,
+        event('DEBATE_ARCHIVED', {
+          id: 'e-archive',
+          debateId: 'debate-1',
+          payload: { previousStatus: 'active', status: 'archived' },
+        }),
+      ],
+      target,
+    );
+    assert.equal(debates.getById(asDebateId('debate-1'))?.status, 'archived');
+  });
 });

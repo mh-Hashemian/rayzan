@@ -114,8 +114,17 @@ export function HomeScreen(input: {
         <h2>Current Debate</h2>
         <p>
           {input.status?.activeDebate
-            ? input.status.activeDebate.topic
+            ? `${input.status.activeDebate.topic} — ${input.status.activeDebate.status}`
             : 'None'}
+        </p>
+      </section>
+
+      <section>
+        <h2>Previous Debates</h2>
+        <p>
+          {input.status
+            ? String(input.status.debateHistory.length)
+            : 'Unavailable'}
         </p>
       </section>
 

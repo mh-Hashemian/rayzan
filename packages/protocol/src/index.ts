@@ -7,6 +7,9 @@ export {
 export {
   createDebate,
   DEBATE_STATUSES,
+  OPEN_DEBATE_STATUSES,
+  isOpenDebateStatus,
+  withDebateStatus,
   type Debate,
   type DebateStatus,
 } from './debate.js';
