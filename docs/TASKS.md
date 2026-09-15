@@ -49,7 +49,8 @@
 
 - [x] Event model
 - [x] Event store abstraction
-- [ ] Persistent event storage
+- [x] Persistent event storage (3B.2 — durable history; replay is 3B.3)
+- [ ] State replay / crash recovery (3B.3)
 - [ ] Debate Observatory
 - [ ] Operator intervention
 

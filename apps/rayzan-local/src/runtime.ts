@@ -1,4 +1,9 @@
-import { recordEvent, type Event, type EventType } from '@rayzan/events';
+import {
+  recordEvent,
+  type Event,
+  type EventStore,
+  type EventType,
+} from '@rayzan/events';
 import {
   asAgentId,
   createAgent,
@@ -204,28 +209,12 @@ export class RayzanRuntime {
   readonly rounds = new InMemoryRoundStore();
   readonly messages = new InMemoryMessageStore();
   readonly exposures = new InMemoryExposureLedgerStore();
-  readonly events = new InMemoryEventStore();
+  readonly events: EventStore;
   readonly transport = new BrowserTransport();
-  readonly orchestrator = new Orchestrator(
-    this.messages,
-    this.exposures,
-    this.transport,
-    this.events,
-  );
-  readonly planner = new DispatchPlanner(this.agents);
-  readonly workflow = new RoundWorkflow(
-    this.orchestrator,
-    this.agents,
-    this.debates,
-    this.rounds,
-  );
-  readonly executor = new CoordinatorCommandExecutor(
-    this.agents,
-    this.debates,
-    this.rounds,
-    this.workflow,
-    this.orchestrator,
-  );
+  readonly orchestrator: Orchestrator;
+  readonly planner: DispatchPlanner;
+  readonly workflow: RoundWorkflow;
+  readonly executor: CoordinatorCommandExecutor;
   readonly syntheses = new InMemorySynthesisStore();
 
   #started = false;
@@ -253,17 +242,40 @@ export class RayzanRuntime {
     }
   >();
 
-  constructor() {
+  constructor(events: EventStore = new InMemoryEventStore()) {
+    this.events = events;
+    this.orchestrator = new Orchestrator(
+      this.messages,
+      this.exposures,
+      this.transport,
+      this.events,
+    );
+    this.planner = new DispatchPlanner(this.agents);
+    this.workflow = new RoundWorkflow(
+      this.orchestrator,
+      this.agents,
+      this.debates,
+      this.rounds,
+    );
+    this.executor = new CoordinatorCommandExecutor(
+      this.agents,
+      this.debates,
+      this.rounds,
+      this.workflow,
+      this.orchestrator,
+    );
     const operator = createAgent({
       id: OPERATOR_ID,
       name: 'Operator',
       role: 'operator',
     });
     this.agents.register(operator);
-    this.#emit('AGENT_REGISTERED', {
-      agentId: operator.id,
-      payload: { name: operator.name, role: operator.role },
-    });
+    if (!this.#hasRegisteredAgentEvent(operator.id)) {
+      this.#emit('AGENT_REGISTERED', {
+        agentId: operator.id,
+        payload: { name: operator.name, role: operator.role },
+      });
+    }
   }
 
   registerAgent(name: string, role: AgentRole): Agent {
@@ -1559,19 +1571,43 @@ export class RayzanRuntime {
   }
 
   #eventLog(): readonly string[] {
-    const lines: string[] = [];
-    for (const event of this.events.listAll()) {
-      if (lines.length > 0) {
-        lines.push('');
-      }
+    const events = this.events.listAll();
+    if (events.length === 0) {
+      return [];
+    }
+    const restoredOnly =
+      this.debates.list().length === 0 &&
+      events.some((event) => event.type === 'DEBATE_CREATED');
+    const lines: string[] = [
+      'Persisted Debate Events',
+      restoredOnly
+        ? 'History only. Debate runtime state is not reconstructed (replay is 3B.3).'
+        : 'Append-only event history. Survives process restart; debate replay is 3B.3.',
+    ];
+    for (const event of events) {
+      lines.push('');
       lines.push(clock(event.timestamp));
       lines.push(event.type);
+      lines.push(`id: ${event.id}`);
+      lines.push(`at: ${event.timestamp.toISOString()}`);
+      if (event.debateId !== undefined) {
+        lines.push(event.debateId);
+      }
       const detail = this.#eventDetail(event);
       if (detail !== undefined) {
         lines.push(detail);
       }
     }
     return lines;
+  }
+
+  #hasRegisteredAgentEvent(agentId: string): boolean {
+    return this.events
+      .listAll()
+      .some(
+        (event) =>
+          event.type === 'AGENT_REGISTERED' && event.agentId === agentId,
+      );
   }
 
   #eventDetail(event: Event): string | undefined {

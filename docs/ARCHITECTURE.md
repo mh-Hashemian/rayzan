@@ -9,7 +9,7 @@ rayzan/
 ├── packages/
 │   ├── protocol/        # shared protocol/domain model
 │   ├── events/          # append-only event model and EventStore contract
-│   ├── storage/         # in-memory event store (persistent storage later)
+│   ├── storage/         # InMemoryEventStore + SqliteEventStore
 │   ├── transport/       # ManualTransport + provider-independent BrowserTransport
 │   └── orchestrator/    # stores, routing, command parse/execute
 ├── apps/
@@ -26,13 +26,15 @@ Purpose: immutable history of system evolution.
 
 Events record what happened. They do not decide meaning. There is no AI analysis, sentiment, agreement detection, or position extraction in this layer. The Coordinator remains responsible for semantic interpretation.
 
-Current implementation: in-memory (`InMemoryEventStore`).
+Current production implementation (`pnpm start:local`): append-only `SqliteEventStore` at `apps/rayzan-local/data/rayzan.sqlite` (gitignored). Tests inject `InMemoryEventStore` or a temporary SQLite file. SQLite is opened in `apps/rayzan-local` and passed into `RayzanRuntime`; Orchestrator does not create the database.
 
-Future: persistent append-only storage.
+`listAll()` and `listByDebate()` return events in `sequence` order (`INTEGER PRIMARY KEY AUTOINCREMENT`), not timestamp order. Payloads are stored as JSON. Timestamps are ISO-8601 and reconstructed as the original `Date`. Duplicate event IDs are rejected. There is no update or delete on `EventStore`.
+
+Checkpoint 3B.2 persists event history across process restart. Checkpoint 3B.3 will replay that history into protocol stores. Restart today does not reconstruct `AgentRegistry`, `DebateStore`, `RoundStore`, `MessageStore`, `ExposureLedger`, or delivery jobs.
 
 The event log is generic. It does not carry provider or browser fields.
 
-`packages/events` (`@rayzan/events`) depends on `@rayzan/protocol` for branded IDs. `packages/storage` (`@rayzan/storage`) implements `EventStore`. `@rayzan/orchestrator` emits mechanical events; it does not require storage to dispatch.
+`packages/events` (`@rayzan/events`) depends on `@rayzan/protocol` for branded IDs. `packages/storage` (`@rayzan/storage`) implements `EventStore` (`InMemoryEventStore` and `SqliteEventStore`). `@rayzan/orchestrator` emits mechanical events; it does not require storage to dispatch.
 
 `packages/transport` (`@rayzan/transport`) depends on `@rayzan/protocol`. It delivers and receives messages. It does not decide debate semantics. It must not import `@rayzan/orchestrator`.
 

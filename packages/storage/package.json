@@ -11,13 +11,15 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/in-memory-event-store.test.ts"
+    "test": "tsx --test src/in-memory-event-store.test.ts src/sqlite-event-store.test.ts"
   },
   "dependencies": {
     "@rayzan/events": "workspace:*",
-    "@rayzan/protocol": "workspace:*"
+    "@rayzan/protocol": "workspace:*",
+    "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "tsx": "^4.23.13"
   }
 }

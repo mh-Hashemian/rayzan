@@ -7,3 +7,10 @@ dist
 .DS_Store
 Thumbs.db
 *.log
+
+# Local SQLite event log (checkpoint 3B.2)
+apps/rayzan-local/data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm

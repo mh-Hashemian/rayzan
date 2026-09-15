@@ -447,7 +447,36 @@ The Operator should understand the debate from one report without reading Watche
 Status: Accepted
 
 Decision:
-Rayzan records system evolution through append-only events. The event log is the source of truth for debate history, future replay, and a visible timeline. Events are generic (`type`, optional `debateId` / `roundId` / `agentId`, `timestamp`, `payload`) and do not carry provider or browser fields. `OPERATOR_INTERVENTION` is a reserved type; intervention behavior is not implemented in 3B.1. The in-memory store is append-only and returns copies. Persistent storage is deferred.
+Rayzan records system evolution through append-only events. The event log is the source of truth for debate history, future replay, and a visible timeline. Events are generic (`type`, optional `debateId` / `roundId` / `agentId`, `timestamp`, `payload`) and do not carry provider or browser fields. `OPERATOR_INTERVENTION` is a reserved type; intervention behavior is not implemented in 3B.1. The in-memory store is append-only and returns copies. Persistent storage is deferred to a later checkpoint.
 
 Reason:
 Debate transparency, replay, and auditability require an immutable history of what happened. Semantic interpretation stays with the Coordinator. Events record facts; they do not decide meaning.
+
+## DEC-047 — Event history is persisted through an append-only SQLite store
+
+Status: Accepted
+
+Decision:
+Event history is persisted through an append-only SQLite store. `SqliteEventStore` implements the existing `EventStore` contract beside `InMemoryEventStore`. Production `rayzan-local` (`pnpm start:local`) injects SQLite at `apps/rayzan-local/data/rayzan.sqlite`. Tests keep `InMemoryEventStore` or a temporary database. The SQLite library is `better-sqlite3` 12.11.1 (Node 20 compatible; v13 requires Node 22). No ORM. The table is:
+
+```sql
+create table events (
+    sequence integer primary key autoincrement,
+    id text not null unique,
+    type text not null,
+    debate_id text,
+    round_id text,
+    agent_id text,
+    timestamp text not null,
+    payload_json text not null
+);
+```
+
+Sequence is storage metadata; callers do not generate it. Duplicate IDs are rejected. Payloads stay generic JSON. Timestamps are stored as ISO-8601 and reconstructed from that stored string, not from the current clock. Schema version is `PRAGMA user_version = 1`. Replay of protocol state is 3B.3, not 3B.2.
+
+Reasons:
+
+- durability
+- auditability
+- deterministic ordering
+- foundation for replay/crash recovery

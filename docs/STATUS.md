@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3B.1 — Event store foundation (waiting for Watcher review)
+Current phase: Phase 3B.2 — Durable SQLite event store (waiting for Operator validation)
 
 Completed:
 
@@ -16,14 +16,17 @@ Completed:
 - Coordinator final synthesis: Round 2 Watcher capture + stored Operator report
 - ChatGPT browser adapter: send + auto-capture (`chatgpt.com` / `chat.openai.com`)
 - Checkpoint 3B.1: append-only event model, InMemoryEventStore, orchestrator emission, debug timeline
+- Checkpoint 3B.2: SqliteEventStore, `apps/rayzan-local/data/rayzan.sqlite`, dashboard persisted timeline
 
 Currently being worked on:
 
-- None (waiting for Watcher review of 3B.1)
+- None (waiting for Operator validation of 3B.2)
 
 Next:
 
-- None until Watcher accepts 3B.1 (persistent storage, Observatory, and Operator intervention are deferred)
+- 3B.3: state replay / crash recovery (do not start until 3B.2 is accepted)
+- Debate Observatory
+- Operator intervention
 
 Blockers:
 
