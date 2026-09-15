@@ -50,16 +50,38 @@ export function evaluateCapture(input: {
   const generationTimeoutMs =
     input.generationTimeoutMs ?? GENERATION_TIMEOUT_MS;
   const stabilityWindowMs = input.stabilityWindowMs ?? STABILITY_WINDOW_MS;
-  const tracked = resolveTrackedTurn(
+  let tracked = resolveTrackedTurn(
     input.observation.turns,
     input.snapshot,
     input.state.trackedIdentity,
   );
 
-  if (tracked === undefined) {
-    if (input.state.trackedIdentity) {
+  if (tracked === undefined && input.state.trackedIdentity) {
+    const last = input.observation.turns.at(-1);
+    const lastIsUnknown =
+      last !== undefined &&
+      !input.snapshot.identities.includes(last.identity);
+    const lastTextChanged =
+      last !== undefined &&
+      last.finalText !== (input.snapshot.lastAssistantText ?? '');
+    if (last !== undefined && (lastIsUnknown || lastTextChanged)) {
+      tracked = last;
+    } else if (input.observation.generating) {
+      if (input.now - input.state.startedAt >= generationTimeoutMs) {
+        return fail(input, 'generation-timeout', false);
+      }
+      return {
+        phase: 'generating',
+        lastText: input.state.lastText,
+        lastChangeAt: input.state.lastChangeAt,
+        trackedConnected: false,
+      };
+    } else {
       return fail(input, 'tracked-turn-disappeared', false);
     }
+  }
+
+  if (tracked === undefined) {
     if (input.observation.generating) {
       if (input.now - input.state.startedAt >= generationTimeoutMs) {
         return fail(input, 'generation-timeout', false);

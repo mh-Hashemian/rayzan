@@ -102,6 +102,7 @@ export interface AgentPresence {
 export interface RayzanSnapshot {
   readonly bridge: 'connected';
   readonly sessionStarted: boolean;
+  readonly restoredFromHistory: boolean;
   readonly debate?: {
     readonly id: string;
     readonly topic: string;
@@ -239,6 +240,7 @@ export class RayzanRuntime {
   #coordinatorParseError: string | undefined;
   #parsedChallenges: readonly WatcherChallenge[] | undefined;
   #replayResult: ReplayResult = emptyReplayResult();
+  #restoredFromHistory = false;
   #presence = new Map<string, AgentPresence>();
   #bindings = new Map<
     string,
@@ -305,6 +307,11 @@ export class RayzanRuntime {
    * browser deliveries.
    */
   createRound1(problem: string): void {
+    if (this.#restoredFromHistory) {
+      throw new Error(
+        'A debate was restored from event history. Replay does not resend prompts or resume capture. Park apps/rayzan-local/data/rayzan.sqlite and start Rayzan with a fresh database to run a new live debate.',
+      );
+    }
     if (this.#started) {
       throw new Error('Round 1 already started');
     }
@@ -361,6 +368,14 @@ export class RayzanRuntime {
    * dispatch the same Round 1 brief. Coordinator is the sender of that brief.
    */
   runLiveRound1(problem: string): void {
+    if (this.#coordinatorBriefSent) {
+      throw new Error('Coordinator Round 1 prompt already queued');
+    }
+    if (this.#restoredFromHistory) {
+      throw new Error(
+        'A debate was restored from event history. Replay does not resend prompts or resume capture. Park apps/rayzan-local/data/rayzan.sqlite and start Rayzan with a fresh database to run a new live debate.',
+      );
+    }
     if (!this.#started) {
       this.createRound1(problem);
     }
@@ -369,9 +384,6 @@ export class RayzanRuntime {
       throw new Error(
         'register at least two Watchers before running live Round 1',
       );
-    }
-    if (this.#coordinatorBriefSent) {
-      throw new Error('Coordinator Round 1 prompt already queued');
     }
     const coordinator = this.#requireSingleCoordinator();
     const debate = this.#debate();
@@ -626,6 +638,7 @@ export class RayzanRuntime {
     return Object.freeze({
       bridge: 'connected',
       sessionStarted: this.#started,
+      restoredFromHistory: this.#restoredFromHistory,
       ...(debateRecord
         ? {
             debate: {
@@ -1612,6 +1625,7 @@ export class RayzanRuntime {
     const result = new EventReplayer().replay(events, this.#replayTarget());
     this.#syncLogicalFlags();
     this.#bumpSeqFromRestoredIds();
+    this.#restoredFromHistory = this.debates.list().length > 0;
     if (this.agents.getById(asAgentId(OPERATOR_ID)) === undefined) {
       this.agents.register(
         createAgent({

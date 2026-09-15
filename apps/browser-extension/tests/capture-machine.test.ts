@@ -254,6 +254,80 @@ describe('capture state machine', () => {
     assert.equal(registry.begin({ ...job, startedAt: 2 }), false);
   });
 
+  it('stays generating when a tracked idx identity remounts while the stop control is visible', () => {
+    const remountedOld = turnFrom('<div>old history</div>', {
+      identity: 'idx:0',
+    });
+    const snapshot: CaptureSnapshot = {
+      identities: ['idx:0'],
+      assistantTurnCount: 1,
+      lastAssistantText: 'old history',
+      lastIncomplete: false,
+    };
+    const evaluation = evaluateCapture({
+      snapshot,
+      observation: { turns: [remountedOld], generating: true },
+      state: {
+        ...initialCaptureState(0),
+        trackedIdentity: 'idx:1',
+        lastText: '',
+      },
+      now: 1000,
+    });
+    assert.equal(evaluation.phase, 'generating');
+    assert.equal(evaluation.failure, undefined);
+  });
+
+  it('follows a remounted last turn whose text is new after the tracked identity disappears', () => {
+    const remounted = turnFrom('<div>fresh coordinator brief</div>', {
+      identity: 'idx:0',
+      finalText: 'fresh coordinator brief',
+    });
+    const snapshot: CaptureSnapshot = {
+      identities: ['idx:0'],
+      assistantTurnCount: 1,
+      lastAssistantText: 'old history',
+      lastIncomplete: false,
+    };
+    const evaluation = evaluateCapture({
+      snapshot,
+      observation: { turns: [remounted], generating: false },
+      state: {
+        ...initialCaptureState(0),
+        trackedIdentity: 'idx:1',
+        lastText: 'fresh coordinator brief',
+        lastChangeAt: 0,
+      },
+      now: 2500,
+      stabilityWindowMs: 2000,
+    });
+    assert.equal(evaluation.phase, 'captured');
+    assert.equal(evaluation.text, 'fresh coordinator brief');
+  });
+
+  it('fails with tracked-turn-disappeared when the identity is gone and nothing new is generating', () => {
+    const old = turnFrom('<div>old history</div>', { identity: 'idx:0' });
+    const snapshot: CaptureSnapshot = {
+      identities: [old.identity],
+      assistantTurnCount: 1,
+      lastAssistantText: 'old history',
+      lastIncomplete: false,
+      elements: new Set([old.element]),
+    };
+    const evaluation = evaluateCapture({
+      snapshot,
+      observation: { turns: [old], generating: false },
+      state: {
+        ...initialCaptureState(0),
+        trackedIdentity: 'idx:1',
+        lastText: 'partial',
+      },
+      now: 1000,
+    });
+    assert.equal(evaluation.phase, 'failed');
+    assert.equal(evaluation.failure, 'tracked-turn-disappeared');
+  });
+
   it('fails with new-turn-timeout instead of stealing the last old message', () => {
     const old = turnFrom('<div>old history</div>', { identity: 'idx:0' });
     const snapshot: CaptureSnapshot = {

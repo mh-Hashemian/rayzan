@@ -50,7 +50,7 @@
 - [x] Event model
 - [x] Event store abstraction
 - [x] Persistent event storage (3B.2 — durable history; replay is 3B.3)
-- [x] State replay / crash recovery (3B.3 — restore projections; do not auto-resume browser jobs)
+- [x] State replay / crash recovery (3B.3 — restore projections; do not auto-resume browser jobs or re-dispatch Start live debate)
 - [ ] Debate Observatory (3B.4)
 - [ ] Operator intervention
 

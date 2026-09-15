@@ -22,6 +22,7 @@ describe('RayzanRuntime Round 1', () => {
     runtime.createRound1('Is automatic capture useful?');
 
     const snap = runtime.snapshot();
+    assert.equal(snap.restoredFromHistory, false);
     assert.equal(snap.debate?.status, 'active');
     assert.equal(snap.round?.number, 1);
     assert.equal(snap.round?.status, 'active');

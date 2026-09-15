@@ -61,6 +61,7 @@ describe('RayzanRuntime event persistence', () => {
       );
 
       const snap = runtimeB.snapshot();
+      assert.equal(snap.restoredFromHistory, true);
       assert.equal(snap.debate?.topic, 'Does event history survive restart?');
       assert.equal(snap.replay.status, 'RESTORED');
       assert.match(snap.eventLog.join('\n'), /Persisted Debate Events/);

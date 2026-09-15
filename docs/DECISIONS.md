@@ -486,7 +486,7 @@ Reasons:
 Status: Accepted
 
 Decision:
-Runtime state is reconstructed by deterministic replay of the append-only event log. Persistent events are the durable history. In-memory protocol stores are runtime projections. `EventReplayer` applies `SqliteEventStore.listAll()` (sequence order, never timestamp order) onto fresh AgentRegistry, DebateStore, RoundStore, MessageStore, ExposureLedger, DebateSynthesis, and a frozen delivery projection. Replay mutates state only; it does not append events and does not trigger browser/HTTP/capture side effects. Replay restores known state. Replay does not automatically resume interrupted browser deliveries.
+Runtime state is reconstructed by deterministic replay of the append-only event log. Persistent events are the durable history. In-memory protocol stores are runtime projections. `EventReplayer` applies `SqliteEventStore.listAll()` (sequence order, never timestamp order) onto fresh AgentRegistry, DebateStore, RoundStore, MessageStore, ExposureLedger, DebateSynthesis, and a frozen delivery projection. Replay mutates state only; it does not append events and does not trigger browser/HTTP/capture side effects. Replay restores known state. Replay does not automatically resume interrupted browser deliveries. After a debate is restored, Start live debate and Create Round 1 are refused so Rayzan cannot inject a second Coordinator Round 1 prompt into an existing chatbot thread.
 
 Reason:
 Crash recovery must reproduce the same logical Rayzan state from the same event stream without duplicating prompts or inventing missing historical fields.

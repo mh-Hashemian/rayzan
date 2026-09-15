@@ -143,6 +143,7 @@ describe('RayzanRuntime event replay', () => {
       const after = runtimeB.snapshot();
 
       assert.equal(storeB.listAll().length, eventCount);
+      assert.equal(after.restoredFromHistory, true);
       assert.equal(after.replay.status, 'RESTORED');
       assert.equal(after.agents.find((agent) => agent.id === coordinator.id)?.name, 'DeepSeek Coordinator');
       assert.equal(after.agents.find((agent) => agent.id === qwen.id)?.role, 'watcher');
@@ -215,6 +216,38 @@ describe('RayzanRuntime event replay', () => {
         after.replay.warnings.map((warning) => warning.message).join('\n'),
         /Operator attention required/,
       );
+      storeB.close();
+    } finally {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // Windows can keep a short lock on the WAL file after close.
+      }
+    }
+  });
+
+  it('refuses Start live debate after a debate is restored', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'rayzan-replay-norestart-'));
+    const filePath = path.join(dir, 'rayzan.sqlite');
+    try {
+      const storeA = new SqliteEventStore(filePath);
+      const runtimeA = new RayzanRuntime(storeA);
+      const { coordinator } = registerTrio(runtimeA);
+      runtimeA.createRound1('Restored debate must not resend');
+      const eventCount = storeA.listAll().length;
+      storeA.close();
+
+      const storeB = new SqliteEventStore(filePath);
+      const runtimeB = new RayzanRuntime(storeB);
+      const after = runtimeB.snapshot();
+      assert.equal(after.restoredFromHistory, true);
+      assert.equal(after.debate?.topic, 'Restored debate must not resend');
+      assert.throws(
+        () => runtimeB.runLiveRound1('Restored debate must not resend'),
+        /restored from event history/,
+      );
+      assert.equal(storeB.listAll().length, eventCount);
+      assert.equal(runtimeB.nextPendingForAgent(coordinator.id), undefined);
       storeB.close();
     } finally {
       try {

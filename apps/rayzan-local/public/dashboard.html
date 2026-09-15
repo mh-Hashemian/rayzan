@@ -430,13 +430,17 @@ Exposures:
         $('agents').textContent = agents.length
           ? agents.map((a) => `${a.name}    ${a.role}`).join('\n')
           : '(none)';
-        const canCreate = Boolean(coordinator) && watchers.length >= 1;
+        const restored = Boolean(state.restoredFromHistory);
+        const canCreate =
+          Boolean(coordinator) && watchers.length >= 1 && !restored;
         const coordinatorCount = agents.filter(
           (a) => a.role === 'coordinator',
         ).length;
-        $('round-create-hint').textContent = canCreate
-          ? ''
-          : `Need 1 coordinator and at least 1 watcher. Currently: ${coordinatorCount} coordinator, ${watchers.length} watcher.`;
+        $('round-create-hint').textContent = restored
+          ? 'A debate was restored from event history. Replay does not resend prompts or resume capture. Park apps/rayzan-local/data/rayzan.sqlite and start Rayzan with a fresh database to run a new live debate.'
+          : canCreate
+            ? ''
+            : `Need 1 coordinator and at least 1 watcher. Currently: ${coordinatorCount} coordinator, ${watchers.length} watcher.`;
         $('create-round').disabled = !canCreate;
         $('run-live').disabled = !canCreate;
 

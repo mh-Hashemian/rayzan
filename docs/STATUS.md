@@ -21,7 +21,7 @@ Completed:
 
 Currently being worked on:
 
-- None (waiting for Operator validation of 3B.3)
+- 3B.3 follow-up: restored debates must not re-dispatch Coordinator Round 1 (Start live debate disabled until a fresh SQLite file)
 
 Next:
 
