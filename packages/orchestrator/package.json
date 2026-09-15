@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/orchestrator.test.ts tests/round-workflow.test.ts tests/dispatch-planner.test.ts tests/coordinator-command-parser.test.ts tests/coordinator-command-executor.test.ts"
+    "test": "tsx --test tests/orchestrator.test.ts tests/round-workflow.test.ts tests/dispatch-planner.test.ts tests/coordinator-command-parser.test.ts tests/coordinator-command-executor.test.ts tests/event-replayer.test.ts"
   },
   "dependencies": {
     "@rayzan/events": "workspace:*",

@@ -8,11 +8,12 @@ import {
   type RoundStatus,
   type RoundStore,
 } from '@rayzan/protocol';
-import type {
-  DeliveryId,
-  InboundResponse,
-  OutboundDelivery,
-  SubmitResponseInput,
+import {
+  asDeliveryId,
+  type DeliveryId,
+  type InboundResponse,
+  type OutboundDelivery,
+  type SubmitResponseInput,
 } from '@rayzan/transport';
 
 import type { DispatchIntent } from './dispatch-intent.js';
@@ -115,6 +116,80 @@ export class RoundWorkflow {
     });
 
     this.#setRoundStatus(roundId, 'active');
+  }
+
+  restoreExecution(input: {
+    roundId: string;
+    participantIds: readonly string[];
+  }): void {
+    const roundId = asRoundId(input.roundId);
+    const round = this.rounds.getById(roundId);
+    if (round === undefined) {
+      throw new OrchestratorError(`unknown round: ${roundId}`);
+    }
+    if (this.debates.getById(round.debateId) === undefined) {
+      throw new OrchestratorError(`unknown debate: ${round.debateId}`);
+    }
+    if (this.#executions.has(roundId)) {
+      throw new OrchestratorError(
+        `round execution already started: ${roundId}`,
+      );
+    }
+    if (input.participantIds.length === 0) {
+      throw new OrchestratorError('participant list cannot be empty');
+    }
+    const participantIds = input.participantIds.map((id) => asAgentId(id));
+    if (new Set(participantIds).size !== participantIds.length) {
+      throw new OrchestratorError('duplicate participant ids');
+    }
+    for (const participantId of participantIds) {
+      if (this.agents.getById(participantId) === undefined) {
+        throw new OrchestratorError(`unknown participant: ${participantId}`);
+      }
+    }
+    this.#executions.set(roundId, {
+      debateId: round.debateId,
+      participantIds: Object.freeze([...participantIds]),
+      deliveries: [],
+      confirmed: new Set(),
+      responded: new Set(),
+    });
+    if (round.status === 'pending') {
+      this.#setRoundStatus(roundId, 'active');
+    }
+  }
+
+  noteRestoredDelivery(
+    roundId: string,
+    delivery: { id: string; recipientId: string },
+  ): void {
+    const execution = this.#requireExecution(roundId);
+    execution.deliveries.push({
+      id: asDeliveryId(delivery.id),
+      recipientId: asAgentId(delivery.recipientId),
+    });
+    const round = this.rounds.getById(asRoundId(roundId));
+    if (round?.status === 'pending' || round?.status === 'active') {
+      this.#setRoundStatus(asRoundId(roundId), 'collecting');
+    }
+  }
+
+  noteRestoredConfirmed(roundId: string, deliveryId: string): void {
+    this.#requireExecution(roundId).confirmed.add(deliveryId);
+  }
+
+  noteRestoredResponded(roundId: string, deliveryId: string): void {
+    const execution = this.#requireExecution(roundId);
+    execution.confirmed.add(deliveryId);
+    execution.responded.add(deliveryId);
+  }
+
+  restoreCompleted(roundId: string): void {
+    this.#setRoundStatus(asRoundId(roundId), 'completed');
+  }
+
+  hasExecution(roundId: string): boolean {
+    return this.#executions.has(asRoundId(roundId));
   }
 
   getParticipantIds(roundId: string): readonly AgentId[] {

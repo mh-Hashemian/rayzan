@@ -472,7 +472,7 @@ create table events (
 );
 ```
 
-Sequence is storage metadata; callers do not generate it. Duplicate IDs are rejected. Payloads stay generic JSON. Timestamps are stored as ISO-8601 and reconstructed from that stored string, not from the current clock. Schema version is `PRAGMA user_version = 1`. Replay of protocol state is 3B.3, not 3B.2.
+Sequence is storage metadata; callers do not generate it. Duplicate IDs are rejected. Payloads stay generic JSON. Timestamps are stored as ISO-8601 and reconstructed from that stored string, not from the current clock. Schema version is `PRAGMA user_version = 1`. Replay of protocol state is 3B.3.
 
 Reasons:
 
@@ -480,3 +480,13 @@ Reasons:
 - auditability
 - deterministic ordering
 - foundation for replay/crash recovery
+
+## DEC-048 — Runtime state is reconstructed by deterministic replay of the append-only event log
+
+Status: Accepted
+
+Decision:
+Runtime state is reconstructed by deterministic replay of the append-only event log. Persistent events are the durable history. In-memory protocol stores are runtime projections. `EventReplayer` applies `SqliteEventStore.listAll()` (sequence order, never timestamp order) onto fresh AgentRegistry, DebateStore, RoundStore, MessageStore, ExposureLedger, DebateSynthesis, and a frozen delivery projection. Replay mutates state only; it does not append events and does not trigger browser/HTTP/capture side effects. Replay restores known state. Replay does not automatically resume interrupted browser deliveries.
+
+Reason:
+Crash recovery must reproduce the same logical Rayzan state from the same event stream without duplicating prompts or inventing missing historical fields.

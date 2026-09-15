@@ -43,3 +43,12 @@ export {
   type ParticipantProgress,
   type RoundProgress,
 } from './round-workflow.js';
+export {
+  EventReplayer,
+  emptyReplayResult,
+  type ReplayResult,
+  type ReplayStatus,
+  type ReplayTarget,
+  type ReplayWarning,
+  type ReplayWarningCode,
+} from './event-replayer.js';

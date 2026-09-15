@@ -18,6 +18,7 @@ import type {
 export class BrowserTransport implements Transport {
   readonly #messages = new Map<MessageId, MessageEnvelope>();
   readonly #deliveries = new Map<DeliveryId, OutboundDelivery>();
+  readonly #frozen = new Set<string>();
 
   send(message: MessageEnvelope): readonly OutboundDelivery[] {
     if (this.#messages.has(message.id)) {
@@ -43,10 +44,41 @@ export class BrowserTransport implements Transport {
     return Object.freeze(deliveries);
   }
 
+  hydrateMessage(message: MessageEnvelope): void {
+    if (!this.#messages.has(message.id)) {
+      this.#messages.set(message.id, message);
+    }
+  }
+
+  hydrateDelivery(delivery: OutboundDelivery): void {
+    if (this.#deliveries.has(delivery.id)) {
+      throw new TransportError(`delivery already exists: ${delivery.id}`);
+    }
+    this.#deliveries.set(delivery.id, Object.freeze({ ...delivery }));
+    this.#frozen.add(delivery.id);
+  }
+
+  setDeliveryStatus(
+    deliveryId: string,
+    status: OutboundDelivery['status'],
+  ): OutboundDelivery {
+    const id = asDeliveryId(deliveryId);
+    const delivery = this.#deliveries.get(id);
+    if (delivery === undefined) {
+      throw new TransportError(`unknown delivery id: ${id}`);
+    }
+    const updated = Object.freeze({
+      ...delivery,
+      status,
+    });
+    this.#deliveries.set(id, updated);
+    return updated;
+  }
+
   listPending(): readonly PendingManualDelivery[] {
     return [...this.#deliveries.values()].filter(
       (delivery): delivery is PendingManualDelivery =>
-        delivery.status === 'pending',
+        delivery.status === 'pending' && !this.#frozen.has(delivery.id),
     );
   }
 
@@ -59,7 +91,9 @@ export class BrowserTransport implements Transport {
   listAwaitingResponseForAgent(agentId: AgentId): readonly OutboundDelivery[] {
     return [...this.#deliveries.values()].filter(
       (delivery) =>
-        delivery.recipientId === agentId && delivery.status === 'delivered',
+        delivery.recipientId === agentId &&
+        delivery.status === 'delivered' &&
+        !this.#frozen.has(delivery.id),
     );
   }
 

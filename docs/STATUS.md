@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3B.2 — Durable SQLite event store (waiting for Operator validation)
+Current phase: Phase 3B.3 — Deterministic event replay (waiting for Operator validation)
 
 Completed:
 
@@ -17,15 +17,15 @@ Completed:
 - ChatGPT browser adapter: send + auto-capture (`chatgpt.com` / `chat.openai.com`)
 - Checkpoint 3B.1: append-only event model, InMemoryEventStore, orchestrator emission, debug timeline
 - Checkpoint 3B.2: SqliteEventStore, `apps/rayzan-local/data/rayzan.sqlite`, dashboard persisted timeline
+- Checkpoint 3B.3: EventReplayer rebuilds in-memory stores from the SQLite event sequence
 
 Currently being worked on:
 
-- None (waiting for Operator validation of 3B.2)
+- None (waiting for Operator validation of 3B.3)
 
 Next:
 
-- 3B.3: state replay / crash recovery (do not start until 3B.2 is accepted)
-- Debate Observatory
+- 3B.4: Debate Observatory (do not start until 3B.3 is accepted)
 - Operator intervention
 
 Blockers:

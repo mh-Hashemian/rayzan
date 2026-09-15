@@ -61,11 +61,12 @@ describe('RayzanRuntime event persistence', () => {
       );
 
       const snap = runtimeB.snapshot();
-      assert.equal(snap.debate, undefined);
+      assert.equal(snap.debate?.topic, 'Does event history survive restart?');
+      assert.equal(snap.replay.status, 'RESTORED');
       assert.match(snap.eventLog.join('\n'), /Persisted Debate Events/);
-      assert.match(snap.eventLog.join('\n'), /History only/);
       assert.match(snap.eventLog.join('\n'), /DEBATE_CREATED/);
       assert.match(snap.eventLog.join('\n'), new RegExp(`id: ${before[0]!.id}`));
+      assert.equal(after.length, before.length);
       storeB.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -11,7 +11,7 @@ rayzan/
 │   ├── events/          # append-only event model and EventStore contract
 │   ├── storage/         # InMemoryEventStore + SqliteEventStore
 │   ├── transport/       # ManualTransport + provider-independent BrowserTransport
-│   └── orchestrator/    # stores, routing, command parse/execute
+│   └── orchestrator/    # stores, routing, command parse/execute, event replay
 ├── apps/
 │   ├── rayzan-local/    # composition root, dashboard, HTTP bridge, fixture chat
 │   └── browser-extension/
@@ -30,7 +30,7 @@ Current production implementation (`pnpm start:local`): append-only `SqliteEvent
 
 `listAll()` and `listByDebate()` return events in `sequence` order (`INTEGER PRIMARY KEY AUTOINCREMENT`), not timestamp order. Payloads are stored as JSON. Timestamps are ISO-8601 and reconstructed as the original `Date`. Duplicate event IDs are rejected. There is no update or delete on `EventStore`.
 
-Checkpoint 3B.2 persists event history across process restart. Checkpoint 3B.3 will replay that history into protocol stores. Restart today does not reconstruct `AgentRegistry`, `DebateStore`, `RoundStore`, `MessageStore`, `ExposureLedger`, or delivery jobs.
+Checkpoint 3B.3 reconstructs in-memory protocol stores by replaying that sequence. Persistent events are the durable history. In-memory stores are runtime projections. There are no `agents` / `debates` / `messages` SQLite tables. Replay performs no browser send, HTTP send, or capture. Interrupted deliveries are restored as frozen unresolved jobs; the Operator must not expect automatic resend.
 
 The event log is generic. It does not carry provider or browser fields.
 

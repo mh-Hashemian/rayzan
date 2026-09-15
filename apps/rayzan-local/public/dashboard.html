@@ -93,10 +93,14 @@ Should Rayzan use SQLite or PostgreSQL for its future persistent local state?</t
       <pre id="synthesis">(waiting for Round 1, Round 2, and synthesis)</pre>
     </section>
     <section>
+      <h2>RUNTIME RECOVERY</h2>
+      <pre id="replay-status">(no replay yet)</pre>
+    </section>
+    <section>
       <h2>DEBATE EVENTS</h2>
       <p>
-        Persisted Debate Events. After restart this timeline is history only —
-        the debate itself is not resumed (replay is 3B.3).
+        Persisted Debate Events. On startup Rayzan rebuilds runtime state from
+        this log. Replay does not resend prompts or start capture jobs.
       </p>
       <pre id="debate-events">(no events yet)</pre>
     </section>
@@ -365,6 +369,58 @@ Exposures:
         );
       }
 
+      function formatReplay(replay) {
+        if (!replay) {
+          return '(no replay yet)';
+        }
+        const status =
+          replay.status === 'RESTORED'
+            ? 'RESTORED ✓'
+            : replay.status === 'RESTORED_WITH_WARNINGS'
+              ? 'RESTORED WITH WARNINGS'
+              : replay.status === 'FAILED'
+                ? 'FAILED'
+                : 'FRESH';
+        const warnings = (replay.warnings || [])
+          .map((warning) => warning.message)
+          .join('\n');
+        return [
+          'Source:',
+          'SQLite Event Log',
+          '',
+          'Events read:',
+          String((replay.appliedEvents || 0) + (replay.skippedEvents || 0)),
+          '',
+          'Events applied:',
+          String(replay.appliedEvents || 0),
+          '',
+          'Agents restored:',
+          String(replay.agentsRestored || 0),
+          '',
+          'Debates restored:',
+          String(replay.debatesRestored || 0),
+          '',
+          'Rounds restored:',
+          String(replay.roundsRestored || 0),
+          '',
+          'Messages restored:',
+          String(replay.messagesRestored || 0),
+          '',
+          'Exposures restored:',
+          String(replay.exposuresRestored || 0),
+          '',
+          'Syntheses restored:',
+          String(replay.synthesesRestored || 0),
+          '',
+          'Unresolved deliveries:',
+          String(replay.unresolvedDeliveries || 0),
+          '',
+          'Status:',
+          status,
+          ...(warnings ? ['', warnings] : []),
+        ].join('\n');
+      }
+
       function applyState(state) {
         const agents = (state.agents || []).filter(
           (a) => a.role !== 'operator',
@@ -452,6 +508,8 @@ Exposures:
         $('debate-events').textContent = (state.eventLog || []).length
           ? (state.eventLog || []).join('\n')
           : '(no events yet)';
+
+        $('replay-status').textContent = formatReplay(state.replay);
 
         $('round1-responses').textContent = (state.round1Responses || []).length
           ? (state.round1Responses || [])

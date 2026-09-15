@@ -6,6 +6,9 @@ import {
 } from '@rayzan/events';
 import {
   asAgentId,
+  asDebateId,
+  asMessageId,
+  asRoundId,
   createAgent,
   createDebate,
   createDebateSynthesis,
@@ -32,10 +35,14 @@ import {
   createCoordinatorExecutionContext,
   createDispatchPlan,
   DispatchPlanner,
+  emptyReplayResult,
+  EventReplayer,
   Orchestrator,
   parseCoordinatorCommandBatch,
   RoundWorkflow,
   type CoordinatorCommandBatch,
+  type ReplayResult,
+  type ReplayTarget,
 } from '@rayzan/orchestrator';
 
 import {
@@ -199,6 +206,7 @@ export interface RayzanSnapshot {
     readonly kind: string;
     readonly body: string;
   }[];
+  readonly replay: ReplayResult;
 }
 
 const CONNECTED_MS = 8000;
@@ -230,6 +238,7 @@ export class RayzanRuntime {
   #coordinatorRaw: string | undefined;
   #coordinatorParseError: string | undefined;
   #parsedChallenges: readonly WatcherChallenge[] | undefined;
+  #replayResult: ReplayResult = emptyReplayResult();
   #presence = new Map<string, AgentPresence>();
   #bindings = new Map<
     string,
@@ -264,18 +273,7 @@ export class RayzanRuntime {
       this.workflow,
       this.orchestrator,
     );
-    const operator = createAgent({
-      id: OPERATOR_ID,
-      name: 'Operator',
-      role: 'operator',
-    });
-    this.agents.register(operator);
-    if (!this.#hasRegisteredAgentEvent(operator.id)) {
-      this.#emit('AGENT_REGISTERED', {
-        agentId: operator.id,
-        payload: { name: operator.name, role: operator.role },
-      });
-    }
+    this.#replayResult = this.#rehydrate();
   }
 
   registerAgent(name: string, role: AgentRole): Agent {
@@ -294,7 +292,7 @@ export class RayzanRuntime {
     this.agents.register(agent);
     this.#emit('AGENT_REGISTERED', {
       agentId: agent.id,
-      payload: { name: agent.name, role: agent.role },
+      payload: { id: agent.id, name: agent.name, role: agent.role },
     });
     this.#record(`Registered ${agent.name} as ${agent.role} (${agent.id}).`);
     return agent;
@@ -343,7 +341,10 @@ export class RayzanRuntime {
     this.#emit('ROUND_CREATED', {
       debateId,
       roundId,
-      payload: { number: 1 },
+      payload: {
+        number: 1,
+        participantIds: watchers.map((watcher) => watcher.id),
+      },
     });
     this.workflow.startRound({
       roundId,
@@ -694,16 +695,7 @@ export class RayzanRuntime {
         };
       }),
       ...(roundProgress ? { roundProgress } : {}),
-      participants: round1
-        ? this.workflow.getParticipantIds(round1.id).map((agentId) => {
-            const agent = this.agents.getById(agentId);
-            return {
-              id: agentId,
-              name: agent?.name ?? agentId,
-              role: agent?.role ?? 'watcher',
-            };
-          })
-        : [],
+      participants: this.#safeParticipants(round1?.id),
       protocol: {
         messages: debateRecord
           ? this.messages.listByDebate(debateRecord.id).length
@@ -735,6 +727,7 @@ export class RayzanRuntime {
             body: message.body,
           }))
         : [],
+      replay: this.#replayResult,
     });
   }
 
@@ -757,7 +750,7 @@ export class RayzanRuntime {
       this.#emit('ROUND_COMPLETED', {
         debateId: round1.debateId,
         roundId: round1.id,
-        payload: { number: 1 },
+        payload: { number: 1, status: 'completed' },
       });
       this.#record('Round 1 auto-completed after all Watcher responses.');
       this.#bootstrapRound2AndNotifyCoordinator();
@@ -784,7 +777,7 @@ export class RayzanRuntime {
       this.#emit('ROUND_COMPLETED', {
         debateId: round2.debateId,
         roundId: round2.id,
-        payload: { number: 2 },
+        payload: { number: 2, status: 'completed' },
       });
       this.#record('Round 2 auto-completed after all Watcher responses.');
       this.#queueCoordinatorSynthesis();
@@ -817,7 +810,10 @@ export class RayzanRuntime {
     this.#emit('ROUND_CREATED', {
       debateId: debate.id,
       roundId: round2Id,
-      payload: { number: 2 },
+      payload: {
+        number: 2,
+        participantIds: watchers.map((watcher) => watcher.id),
+      },
     });
     this.workflow.startRound({
       roundId: round2Id,
@@ -1050,7 +1046,11 @@ export class RayzanRuntime {
       this.#emit('SYNTHESIS_CREATED', {
         debateId: synthesis.debateId,
         agentId: synthesis.coordinatorId,
-        payload: { coordinatorId: synthesis.coordinatorId },
+        payload: {
+          coordinatorId: synthesis.coordinatorId,
+          body: synthesis.body,
+          createdAt: synthesis.createdAt,
+        },
       });
       this.debates.update(
         createDebate({
@@ -1575,14 +1575,16 @@ export class RayzanRuntime {
     if (events.length === 0) {
       return [];
     }
-    const restoredOnly =
-      this.debates.list().length === 0 &&
-      events.some((event) => event.type === 'DEBATE_CREATED');
+    const restored = this.debates.list().length > 0;
+    const incompleteHistory =
+      !restored && events.some((item) => item.type === 'DEBATE_CREATED');
     const lines: string[] = [
       'Persisted Debate Events',
-      restoredOnly
-        ? 'History only. Debate runtime state is not reconstructed (replay is 3B.3).'
-        : 'Append-only event history. Survives process restart; debate replay is 3B.3.',
+      incompleteHistory
+        ? 'History available. Runtime reconstruction incomplete.'
+        : restored
+          ? 'Runtime restored by deterministic event replay. Browser jobs were not resumed.'
+          : 'Append-only event history. Survives process restart.',
     ];
     for (const event of events) {
       lines.push('');
@@ -1601,13 +1603,190 @@ export class RayzanRuntime {
     return lines;
   }
 
-  #hasRegisteredAgentEvent(agentId: string): boolean {
-    return this.events
-      .listAll()
-      .some(
-        (event) =>
-          event.type === 'AGENT_REGISTERED' && event.agentId === agentId,
+  #rehydrate(): ReplayResult {
+    const events = this.events.listAll();
+    if (events.length === 0) {
+      this.#bootstrapOperator();
+      return emptyReplayResult('FRESH');
+    }
+    const result = new EventReplayer().replay(events, this.#replayTarget());
+    this.#syncLogicalFlags();
+    this.#bumpSeqFromRestoredIds();
+    if (this.agents.getById(asAgentId(OPERATOR_ID)) === undefined) {
+      this.agents.register(
+        createAgent({
+          id: OPERATOR_ID,
+          name: 'Operator',
+          role: 'operator',
+        }),
       );
+    }
+    return result;
+  }
+
+  #bootstrapOperator(): void {
+    const operator = createAgent({
+      id: OPERATOR_ID,
+      name: 'Operator',
+      role: 'operator',
+    });
+    this.agents.register(operator);
+    this.#emit('AGENT_REGISTERED', {
+      agentId: operator.id,
+      payload: { id: operator.id, name: operator.name, role: operator.role },
+    });
+  }
+
+  #syncLogicalFlags(): void {
+    const debate = this.debates.list()[0];
+    this.#started = debate !== undefined;
+    const round1 = this.#roundByNumber(1);
+    const round2 = this.#roundByNumber(2);
+    this.#round2Bootstrapped = round2 !== undefined;
+    const coordinator = this.agents.listByRole('coordinator')[0];
+    const messages =
+      debate === undefined ? [] : this.messages.listByDebate(debate.id);
+    this.#coordinatorBriefSent = messages.some(
+      (message) =>
+        message.senderId === OPERATOR_ID &&
+        coordinator !== undefined &&
+        message.recipientIds.includes(coordinator.id),
+    );
+    this.#round1Dispatched = messages.some(
+      (message) =>
+        coordinator !== undefined &&
+        message.senderId === coordinator.id &&
+        (message.kind === 'brief' || message.kind === 'query') &&
+        round1 !== undefined &&
+        message.roundId === round1.id,
+    );
+    this.#round2Dispatched =
+      round2 !== undefined &&
+      messages.some(
+        (message) =>
+          message.roundId === round2.id && message.kind === 'query',
+      );
+    this.#synthesisQueued =
+      (debate !== undefined &&
+        this.syntheses.getByDebateId(debate.id) !== undefined) ||
+      messages.some(
+        (message) =>
+          coordinator !== undefined &&
+          message.recipientIds.includes(coordinator.id) &&
+          message.kind === 'input' &&
+          this.#round2Dispatched,
+      );
+  }
+
+  #bumpSeqFromRestoredIds(): void {
+    const debate = this.debates.list()[0];
+    const ids = [
+      ...this.debates.list().map((item) => item.id),
+      ...(debate
+        ? this.rounds.listByDebate(debate.id).map((round) => round.id)
+        : []),
+      ...(debate
+        ? this.messages.listByDebate(debate.id).map((message) => message.id)
+        : []),
+      ...this.transport.listAll().map((delivery) => delivery.id),
+    ];
+    for (const id of ids) {
+      const match = /-(\d+)$/.exec(id);
+      if (match?.[1] !== undefined) {
+        const value = Number(match[1]);
+        if (Number.isInteger(value)) {
+          this.#seq = Math.max(this.#seq, value);
+        }
+      }
+    }
+  }
+
+  #replayTarget(): ReplayTarget {
+    return {
+      getAgent: (id) => this.agents.getById(asAgentId(id)),
+      registerAgent: (agent) => {
+        this.agents.register(agent);
+      },
+      getDebate: (id) => this.debates.getById(asDebateId(id)),
+      createDebate: (debate) => {
+        this.debates.create(debate);
+      },
+      updateDebate: (debate) => {
+        this.debates.update(debate);
+      },
+      getRound: (id) => this.rounds.getById(asRoundId(id)),
+      createRound: (round) => {
+        this.rounds.create(round);
+      },
+      updateRound: (round) => {
+        this.rounds.update(round);
+      },
+      getMessage: (id) => this.messages.getById(asMessageId(id)),
+      storeMessage: (message) => {
+        this.messages.store(message);
+      },
+      recordExposure: (record) => {
+        this.exposures.record(record);
+      },
+      getSynthesis: (debateId) =>
+        this.syntheses.getByDebateId(asDebateId(debateId)),
+      storeSynthesis: (synthesis) => {
+        this.syntheses.store(synthesis);
+      },
+      hydrateMessage: (message) => {
+        this.transport.hydrateMessage(message);
+      },
+      hydrateDelivery: (delivery) => {
+        this.transport.hydrateDelivery(delivery);
+      },
+      getDelivery: (id) => this.transport.getDelivery(asDeliveryId(id)),
+      setDeliveryStatus: (id, status) => {
+        this.transport.setDeliveryStatus(id, status);
+      },
+      restoreRoundExecution: (roundId, participantIds) => {
+        this.workflow.restoreExecution({ roundId, participantIds });
+      },
+      hasRoundExecution: (roundId) => this.workflow.hasExecution(roundId),
+      noteRoundDelivery: (roundId, delivery) => {
+        this.workflow.noteRestoredDelivery(roundId, delivery);
+      },
+      noteRoundConfirmed: (roundId, deliveryId) => {
+        this.workflow.noteRestoredConfirmed(roundId, deliveryId);
+      },
+      noteRoundResponded: (roundId, deliveryId) => {
+        this.workflow.noteRestoredResponded(roundId, deliveryId);
+      },
+      restoreRoundCompleted: (roundId) => {
+        this.workflow.restoreCompleted(roundId);
+      },
+      restoreDeliveryReferences: (deliveryId, referencedMessageIds) => {
+        this.orchestrator.restoreDeliveryReferences(
+          deliveryId,
+          referencedMessageIds.map((id) => asMessageId(id)),
+        );
+      },
+      listDeliveries: () => this.transport.listAll(),
+    };
+  }
+
+  #safeParticipants(
+    roundId: string | undefined,
+  ): RayzanSnapshot['participants'] {
+    if (roundId === undefined) {
+      return [];
+    }
+    try {
+      return this.workflow.getParticipantIds(roundId).map((agentId) => {
+        const agent = this.agents.getById(agentId);
+        return {
+          id: agentId,
+          name: agent?.name ?? agentId,
+          role: agent?.role ?? 'watcher',
+        };
+      });
+    } catch {
+      return [];
+    }
   }
 
   #eventDetail(event: Event): string | undefined {

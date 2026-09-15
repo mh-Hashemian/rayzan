@@ -40,6 +40,7 @@ export class Orchestrator {
         senderId: message.senderId,
         recipientIds: [...message.recipientIds],
         kind: message.kind,
+        body: message.body,
       },
     });
 
@@ -66,8 +67,10 @@ export class Orchestrator {
         payload: {
           deliveryId: delivery.id,
           messageId: delivery.messageId,
+          senderId: delivery.senderId,
           recipientId: delivery.recipientId,
           status: delivery.status,
+          referencedMessageIds,
         },
       });
     }
@@ -115,6 +118,7 @@ export class Orchestrator {
         exposureId: exposure.id,
         messageId: exposure.messageId,
         agentId: exposure.agentId,
+        referencedMessageIds: [...exposure.referencedMessageIds],
       },
     });
 
@@ -133,6 +137,7 @@ export class Orchestrator {
         senderId: inbound.message.senderId,
         recipientIds: [...inbound.message.recipientIds],
         kind: inbound.message.kind,
+        body: inbound.message.body,
       },
     });
     this.#emit('RESPONSE_CAPTURED', {
@@ -146,6 +151,13 @@ export class Orchestrator {
       },
     });
     return inbound;
+  }
+
+  restoreDeliveryReferences(
+    deliveryId: string,
+    referencedMessageIds: readonly MessageId[],
+  ): void {
+    this.#deliveryReferences.set(deliveryId, referencedMessageIds);
   }
 
   #emit(
