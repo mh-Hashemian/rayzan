@@ -349,7 +349,12 @@ describe('Orchestrator event emission', () => {
 
     assert.deepEqual(
       events.listByDebate(debate.id).map((event) => event.type),
-      ['MESSAGE_CREATED', 'MESSAGE_DISPATCHED', 'DELIVERY_CREATED'],
+      [
+        'MESSAGE_CREATED',
+        'MESSAGE_DISPATCHED',
+        'DELIVERY_CREATED',
+        'PROMPT_DISPATCH_REQUESTED',
+      ],
     );
 
     orchestrator.confirmDelivery(delivery.id);
@@ -365,11 +370,20 @@ describe('Orchestrator event emission', () => {
         'MESSAGE_CREATED',
         'MESSAGE_DISPATCHED',
         'DELIVERY_CREATED',
+        'PROMPT_DISPATCH_REQUESTED',
         'DELIVERY_CONFIRMED',
+        'PROMPT_DISPATCH_CONFIRMED',
         'EXPOSURE_CREATED',
+        'CAPTURE_REQUESTED',
         'MESSAGE_CREATED',
         'RESPONSE_CAPTURED',
       ],
+    );
+    assert.equal(events.listAll()[0]?.schemaVersion, 1);
+    assert.equal(
+      events.listAll().find((event) => event.type === 'PROMPT_DISPATCH_REQUESTED')
+        ?.correlationId,
+      `delivery:${delivery.id}`,
     );
     assert.equal(messages.getById(brief.id), brief);
     assert.equal(exposures.listByAgent(qwen.id).length, 1);

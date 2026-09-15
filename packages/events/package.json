@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/event.test.ts"
+    "test": "tsx --test src/event.test.ts src/causality.test.ts"
   },
   "dependencies": {
     "@rayzan/protocol": "workspace:*"

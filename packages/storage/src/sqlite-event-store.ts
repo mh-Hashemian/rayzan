@@ -5,6 +5,8 @@ import {
   copyEvent,
   createEvent,
   EventError,
+  LEGACY_EVENT_SCHEMA_VERSION,
+  validateCausalReference,
   type Event,
   type EventStore,
   type EventType,
@@ -12,14 +14,18 @@ import {
 import type { DebateId } from '@rayzan/protocol';
 import Database from 'better-sqlite3';
 
-export const EVENT_SCHEMA_VERSION = 1;
+/** SQLite `PRAGMA user_version`. Independent of Event.schemaVersion. */
+export const EVENT_SCHEMA_VERSION = 2;
 
 interface EventRow {
   id: string;
   type: string;
+  schema_version: number | null;
   debate_id: string | null;
   round_id: string | null;
   agent_id: string | null;
+  causation_event_id: string | null;
+  correlation_id: string | null;
   timestamp: string;
   payload_json: string;
 }
@@ -27,9 +33,12 @@ interface EventRow {
 interface InsertParams {
   id: string;
   type: string;
+  schema_version: number;
   debate_id: string | null;
   round_id: string | null;
   agent_id: string | null;
+  causation_event_id: string | null;
+  correlation_id: string | null;
   timestamp: string;
   payload_json: string;
 }
@@ -53,23 +62,28 @@ export class SqliteEventStore implements EventStore {
     this.#initialize();
     this.#insert = this.#db.prepare(`
       INSERT INTO events (
-        id, type, debate_id, round_id, agent_id, timestamp, payload_json
+        id, type, schema_version, debate_id, round_id, agent_id,
+        causation_event_id, correlation_id, timestamp, payload_json
       ) VALUES (
-        @id, @type, @debate_id, @round_id, @agent_id, @timestamp, @payload_json
+        @id, @type, @schema_version, @debate_id, @round_id, @agent_id,
+        @causation_event_id, @correlation_id, @timestamp, @payload_json
       )
     `);
     this.#getById = this.#db.prepare(`
-      SELECT id, type, debate_id, round_id, agent_id, timestamp, payload_json
+      SELECT id, type, schema_version, debate_id, round_id, agent_id,
+             causation_event_id, correlation_id, timestamp, payload_json
       FROM events
       WHERE id = ?
     `);
     this.#listAll = this.#db.prepare(`
-      SELECT id, type, debate_id, round_id, agent_id, timestamp, payload_json
+      SELECT id, type, schema_version, debate_id, round_id, agent_id,
+             causation_event_id, correlation_id, timestamp, payload_json
       FROM events
       ORDER BY sequence ASC
     `);
     this.#listByDebate = this.#db.prepare(`
-      SELECT id, type, debate_id, round_id, agent_id, timestamp, payload_json
+      SELECT id, type, schema_version, debate_id, round_id, agent_id,
+             causation_event_id, correlation_id, timestamp, payload_json
       FROM events
       WHERE debate_id = ?
       ORDER BY sequence ASC
@@ -84,13 +98,17 @@ export class SqliteEventStore implements EventStore {
 
   append(event: Event): void {
     const stored = copyEvent(event);
+    validateCausalReference(stored, (id) => this.getById(id));
     try {
       this.#insert.run({
         id: stored.id,
         type: stored.type,
+        schema_version: stored.schemaVersion,
         debate_id: stored.debateId ?? null,
         round_id: stored.roundId ?? null,
         agent_id: stored.agentId ?? null,
+        causation_event_id: stored.causationEventId ?? null,
+        correlation_id: stored.correlationId ?? null,
         timestamp: stored.timestamp.toISOString(),
         payload_json: JSON.stringify(stored.payload),
       });
@@ -123,9 +141,12 @@ export class SqliteEventStore implements EventStore {
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
           id TEXT NOT NULL UNIQUE,
           type TEXT NOT NULL,
+          schema_version INTEGER,
           debate_id TEXT,
           round_id TEXT,
           agent_id TEXT,
+          causation_event_id TEXT,
+          correlation_id TEXT,
           timestamp TEXT NOT NULL,
           payload_json TEXT NOT NULL
         );
@@ -133,9 +154,34 @@ export class SqliteEventStore implements EventStore {
       this.#db.pragma(`user_version = ${EVENT_SCHEMA_VERSION}`);
       return;
     }
-    if (version !== EVENT_SCHEMA_VERSION) {
-      throw new EventError(`unsupported event schema version: ${version}`);
+    if (version === 1) {
+      this.#migrateFromV1();
+      return;
     }
+    if (version === EVENT_SCHEMA_VERSION) {
+      return;
+    }
+    throw new EventError(`unsupported event schema version: ${version}`);
+  }
+
+  #migrateFromV1(): void {
+    const migrate = this.#db.transaction(() => {
+      const columns = this.#db.pragma('table_info(events)') as Array<{
+        name: string;
+      }>;
+      const names = new Set(columns.map((column) => column.name));
+      if (!names.has('schema_version')) {
+        this.#db.exec('ALTER TABLE events ADD COLUMN schema_version INTEGER');
+      }
+      if (!names.has('causation_event_id')) {
+        this.#db.exec('ALTER TABLE events ADD COLUMN causation_event_id TEXT');
+      }
+      if (!names.has('correlation_id')) {
+        this.#db.exec('ALTER TABLE events ADD COLUMN correlation_id TEXT');
+      }
+      this.#db.pragma(`user_version = ${EVENT_SCHEMA_VERSION}`);
+    });
+    migrate();
   }
 }
 
@@ -149,10 +195,20 @@ function rowToEvent(row: EventRow): Event {
   return createEvent({
     id: row.id,
     type: row.type as EventType,
+    schemaVersion:
+      row.schema_version === null
+        ? LEGACY_EVENT_SCHEMA_VERSION
+        : row.schema_version,
     timestamp: new Date(row.timestamp),
     ...(row.debate_id !== null ? { debateId: row.debate_id } : {}),
     ...(row.round_id !== null ? { roundId: row.round_id } : {}),
     ...(row.agent_id !== null ? { agentId: row.agent_id } : {}),
+    ...(row.causation_event_id !== null
+      ? { causationEventId: row.causation_event_id }
+      : {}),
+    ...(row.correlation_id !== null
+      ? { correlationId: row.correlation_id }
+      : {}),
     payload,
   });
 }

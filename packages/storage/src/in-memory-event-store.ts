@@ -1,6 +1,7 @@
 import {
   copyEvent,
   EventError,
+  validateCausalReference,
   type Event,
   type EventStore,
 } from '@rayzan/events';
@@ -14,8 +15,9 @@ export class InMemoryEventStore implements EventStore {
     if (this.#byId.has(event.id)) {
       throw new EventError(`duplicate event id: ${event.id}`);
     }
+    validateCausalReference(event, (id) => this.#byId.get(id));
     const stored = copyEvent(event);
-    this.#byId.set(event.id, stored);
+    this.#byId.set(stored.id, stored);
     this.#events.push(stored);
   }
 

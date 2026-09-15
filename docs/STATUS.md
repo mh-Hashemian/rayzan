@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3B.3 — Deterministic event replay (waiting for Operator validation)
+Current phase: Phase 3B.4 — Event contract and causal provenance (waiting for Operator validation)
 
 Completed:
 
@@ -18,14 +18,16 @@ Completed:
 - Checkpoint 3B.1: append-only event model, InMemoryEventStore, orchestrator emission, debug timeline
 - Checkpoint 3B.2: SqliteEventStore, `apps/rayzan-local/data/rayzan.sqlite`, dashboard persisted timeline
 - Checkpoint 3B.3: EventReplayer rebuilds in-memory stores from the SQLite event sequence
+- 3B.3 follow-up: restored debates must not re-dispatch Coordinator Round 1
 
 Currently being worked on:
 
-- 3B.3 follow-up: restored debates must not re-dispatch Coordinator Round 1 (Start live debate disabled until a fresh SQLite file)
+- None (waiting for Operator validation of 3B.4)
 
 Next:
 
-- 3B.4: Debate Observatory (do not start until 3B.3 is accepted)
+- React product UI foundation (do not start until 3B.4 is accepted)
+- Debate Observatory
 - Operator intervention
 
 Blockers:

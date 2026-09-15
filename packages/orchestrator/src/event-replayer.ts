@@ -28,6 +28,11 @@ import {
   type OutboundDelivery,
 } from '@rayzan/transport';
 
+import {
+  classifyExternalActions,
+  type ExternalActionRecovery,
+} from './external-action-recovery.js';
+
 export type ReplayStatus =
   | 'FRESH'
   | 'RESTORED'
@@ -38,6 +43,7 @@ export type ReplayWarningCode =
   | 'historical'
   | 'integrity'
   | 'unresolved-delivery'
+  | 'in-doubt'
   | 'unsupported';
 
 export interface ReplayWarning {
@@ -57,6 +63,8 @@ export interface ReplayResult {
   readonly exposuresRestored: number;
   readonly synthesesRestored: number;
   readonly unresolvedDeliveries: number;
+  readonly unresolvedExternalActions: number;
+  readonly externalActions: readonly ExternalActionRecovery[];
   readonly warnings: readonly ReplayWarning[];
   readonly status: ReplayStatus;
 }
@@ -109,6 +117,8 @@ export function emptyReplayResult(status: ReplayStatus = 'FRESH'): ReplayResult 
     exposuresRestored: 0,
     synthesesRestored: 0,
     unresolvedDeliveries: 0,
+    unresolvedExternalActions: 0,
+    externalActions: [],
     warnings: [],
     status,
   };
@@ -180,7 +190,25 @@ export class EventReplayer {
     const unresolved = target
       .listDeliveries()
       .filter((delivery) => delivery.status !== 'responded');
+    const externalActions = classifyExternalActions(events, target.listDeliveries());
+    for (const action of externalActions) {
+      if (action.state !== 'IN_DOUBT') {
+        continue;
+      }
+      warnings.push({
+        eventId: action.requestedEventId,
+        code: 'in-doubt',
+        message: `${action.agentId ?? 'unknown'} ${action.action} is IN_DOUBT. ${action.reason}. Operator attention required. Nothing was resent.`,
+      });
+    }
     for (const delivery of unresolved) {
+      const already = externalActions.some(
+        (action) =>
+          action.deliveryId === delivery.id && action.state === 'IN_DOUBT',
+      );
+      if (already) {
+        continue;
+      }
       warnings.push({
         code: 'unresolved-delivery',
         message: `Delivery ${delivery.id} to ${delivery.recipientId} is ${delivery.status} after restart. Response unknown. Operator attention required. Nothing was resent.`,
@@ -204,6 +232,10 @@ export class EventReplayer {
       exposuresRestored,
       synthesesRestored,
       unresolvedDeliveries: unresolved.length,
+      unresolvedExternalActions: externalActions.filter(
+        (action) => action.state === 'IN_DOUBT',
+      ).length,
+      externalActions,
       warnings,
       status,
     };
@@ -234,6 +266,12 @@ export class EventReplayer {
           return this.#roundCompleted(event, target);
         case 'SYNTHESIS_CREATED':
           return this.#synthesisCreated(event, target);
+        case 'PROMPT_DISPATCH_REQUESTED':
+        case 'PROMPT_DISPATCH_CONFIRMED':
+        case 'PROMPT_DISPATCH_FAILED':
+        case 'CAPTURE_REQUESTED':
+        case 'CAPTURE_FAILED':
+          return { kind: 'applied' };
         case 'OPERATOR_INTERVENTION':
           return {
             kind: 'skipped',

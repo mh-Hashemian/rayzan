@@ -30,7 +30,15 @@ Current production implementation (`pnpm start:local`): append-only `SqliteEvent
 
 `listAll()` and `listByDebate()` return events in `sequence` order (`INTEGER PRIMARY KEY AUTOINCREMENT`), not timestamp order. Payloads are stored as JSON. Timestamps are ISO-8601 and reconstructed as the original `Date`. Duplicate event IDs are rejected. There is no update or delete on `EventStore`.
 
+The event envelope is versioned (`schemaVersion`). Newly emitted events use `schemaVersion = 1`. Historical rows from before 3B.4 are read as legacy (`schemaVersion = 0`) without rewriting stored JSON. Optional `causationEventId` is a direct causal edge to an earlier event. Optional `correlationId` groups one logical operation. SQLite `sequence` is storage order, not domain causality. Causation is validated at append: the cause must already exist (so it is earlier in sequence), must not be the same event, and must not belong to a different debate. Cycles are impossible because a cause can only point backward.
+
 Checkpoint 3B.3 reconstructs in-memory protocol stores by replaying that sequence. Persistent events are the durable history. In-memory stores are runtime projections. There are no `agents` / `debates` / `messages` SQLite tables. Replay performs no browser send, HTTP send, or capture. Interrupted deliveries are restored as frozen unresolved jobs; the Operator must not expect automatic resend. Start live debate and Create Round 1 are refused when a debate was restored so Rayzan cannot inject a second Coordinator prompt into an existing chatbot thread. A new live debate requires a fresh SQLite file.
+
+External browser actions use request/confirmed/failed lifecycle events (`PROMPT_DISPATCH_*`, `CAPTURE_REQUESTED`, `RESPONSE_CAPTURED`, `CAPTURE_FAILED`). After replay, a request without a later terminal is `IN_DOUBT`. Replay never retries those actions.
+
+See `docs/EVENT-CATALOG.md` for per-type payload, causation, correlation, and replay effects.
+
+SQLite `PRAGMA user_version = 2` adds nullable `schema_version`, `causation_event_id`, and `correlation_id` columns. Existing v1 databases are migrated in place. Old rows keep NULL envelope columns.
 
 The event log is generic. It does not carry provider or browser fields.
 

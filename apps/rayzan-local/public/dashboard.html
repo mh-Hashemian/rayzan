@@ -97,6 +97,14 @@ Should Rayzan use SQLite or PostgreSQL for its future persistent local state?</t
       <pre id="replay-status">(no replay yet)</pre>
     </section>
     <section>
+      <h2>EXTERNAL ACTION RECOVERY</h2>
+      <pre id="external-recovery">(none)</pre>
+    </section>
+    <section>
+      <h2>EVENT DETAILS</h2>
+      <pre id="event-details">(no events yet)</pre>
+    </section>
+    <section>
       <h2>DEBATE EVENTS</h2>
       <p>
         Persisted Debate Events. On startup Rayzan rebuilds runtime state from
@@ -415,6 +423,9 @@ Exposures:
           'Unresolved deliveries:',
           String(replay.unresolvedDeliveries || 0),
           '',
+          'Unresolved external actions:',
+          String(replay.unresolvedExternalActions || 0),
+          '',
           'Status:',
           status,
           ...(warnings ? ['', warnings] : []),
@@ -514,6 +525,13 @@ Exposures:
           : '(no events yet)';
 
         $('replay-status').textContent = formatReplay(state.replay);
+        $('event-details').textContent = (state.eventDetails || []).length
+          ? (state.eventDetails || []).join('\n\n')
+          : '(no events yet)';
+        $('external-recovery').textContent = (state.externalActionRecovery || [])
+          .length
+          ? (state.externalActionRecovery || []).join('\n\n')
+          : '(none)';
 
         $('round1-responses').textContent = (state.round1Responses || []).length
           ? (state.round1Responses || [])

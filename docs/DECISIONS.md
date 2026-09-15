@@ -472,7 +472,7 @@ create table events (
 );
 ```
 
-Sequence is storage metadata; callers do not generate it. Duplicate IDs are rejected. Payloads stay generic JSON. Timestamps are stored as ISO-8601 and reconstructed from that stored string, not from the current clock. Schema version is `PRAGMA user_version = 1`. Replay of protocol state is 3B.3.
+Sequence is storage metadata; callers do not generate it. Duplicate IDs are rejected. Payloads stay generic JSON. Timestamps are stored as ISO-8601 and reconstructed from that stored string, not from the current clock. Schema version was `PRAGMA user_version = 1` at 3B.2. Envelope versioning and causal columns are 3B.4 (`PRAGMA user_version = 2`).
 
 Reasons:
 
@@ -490,3 +490,24 @@ Runtime state is reconstructed by deterministic replay of the append-only event 
 
 Reason:
 Crash recovery must reproduce the same logical Rayzan state from the same event stream without duplicating prompts or inventing missing historical fields.
+
+## DEC-049 — Events use an explicit versioned envelope with causal and correlation metadata
+
+Status: Accepted
+
+Decision:
+Events use an explicit versioned envelope with causal and correlation metadata. Newly emitted events set `schemaVersion = 1`. Optional `causationEventId` is the previous event that directly caused this event. Optional `correlationId` groups events that belong to one logical operation. SQLite `sequence` remains authoritative event order and is not domain causality. Causation is validated at append against already-stored earlier events; timestamps are never used to resolve causality. Historical events from before 3B.4 may lack these fields and are read as legacy schema version 0. Existing rows are not rewritten. SQLite migrates `PRAGMA user_version` from 1 to 2 by adding nullable `schema_version`, `causation_event_id`, and `correlation_id` columns.
+
+Reason:
+The Observatory and crash recovery need a stable, versioned event contract with explicit causal edges rather than inferred timelines.
+
+## DEC-050 — External side effects use requested/confirmed/failed lifecycle events and unresolved operations become IN_DOUBT after recovery
+
+Status: Accepted
+
+Decision:
+External side effects use requested/confirmed/failed lifecycle events. Prompt send is `PROMPT_DISPATCH_REQUESTED` then `PROMPT_DISPATCH_CONFIRMED` or `PROMPT_DISPATCH_FAILED`. Capture is `CAPTURE_REQUESTED` then `RESPONSE_CAPTURED` or `CAPTURE_FAILED`. If restart happens after a request and before any terminal event, recovery classifies the action `IN_DOUBT`. Replay remains side-effect free: it does not resend, retry, or start capture. The crash test approximates process death by closing the SQLite store and reopening the same file; it is not a full OS-level `kill -9` harness.
+
+Reason:
+Browser and other external actions are not replayable. The Operator must see incomplete external work explicitly instead of silent duplication.
+

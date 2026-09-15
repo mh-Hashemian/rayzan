@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 
 import { createEvent, EventError } from '@rayzan/events';
 import { asDebateId } from '@rayzan/protocol';
+import Database from 'better-sqlite3';
 
 import { SqliteEventStore } from './sqlite-event-store.js';
 
@@ -154,6 +155,86 @@ describe('SqliteEventStore', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('migrates a v1 database without rewriting historical rows', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'rayzan-events-v1-'));
+    const filePath = path.join(dir, 'events.sqlite');
+    try {
+      const raw = new Database(filePath);
+      raw.exec(`
+        CREATE TABLE events (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          id TEXT NOT NULL UNIQUE,
+          type TEXT NOT NULL,
+          debate_id TEXT,
+          round_id TEXT,
+          agent_id TEXT,
+          timestamp TEXT NOT NULL,
+          payload_json TEXT NOT NULL
+        );
+      `);
+      raw.pragma('user_version = 1');
+      raw.prepare(
+        `INSERT INTO events (id, type, debate_id, round_id, agent_id, timestamp, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        'legacy-1',
+        'DEBATE_CREATED',
+        'debate-1',
+        null,
+        null,
+        '2026-09-15T20:01:00.000Z',
+        JSON.stringify({ topic: 'legacy topic', status: 'active' }),
+      );
+      raw.close();
+
+      const store = new SqliteEventStore(filePath);
+      const legacy = store.getById('legacy-1');
+      assert.equal(legacy?.schemaVersion, 0);
+      assert.equal(legacy?.type, 'DEBATE_CREATED');
+      assert.deepEqual(legacy?.payload, {
+        topic: 'legacy topic',
+        status: 'active',
+      });
+      assert.equal('causationEventId' in (legacy ?? {}), false);
+
+      const next = createEvent({
+        id: 'new-1',
+        type: 'ROUND_CREATED',
+        debateId: 'debate-1',
+        roundId: 'round-1',
+        causationEventId: 'legacy-1',
+        correlationId: 'round:round-1',
+        timestamp: new Date('2026-09-15T20:02:00.000Z'),
+        payload: { number: 1 },
+      });
+      store.append(next);
+      const storedNew = store.getById('new-1');
+      assert.equal(storedNew?.schemaVersion, 1);
+      assert.equal(storedNew?.causationEventId, 'legacy-1');
+      assert.equal(store.getById('legacy-1')?.schemaVersion, 0);
+      store.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects causation that is not an earlier stored event', () => {
+    withTempStore((store) => {
+      assert.throws(
+        () =>
+          store.append(
+            createEvent({
+              id: 'orphan',
+              type: 'DELIVERY_CONFIRMED',
+              causationEventId: 'missing',
+              timestamp: new Date('2026-09-15T20:01:00.000Z'),
+            }),
+          ),
+        EventError,
+      );
+    });
   });
 
   it('orders events with identical timestamps by sequence', () => {

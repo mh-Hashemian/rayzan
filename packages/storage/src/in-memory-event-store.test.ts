@@ -74,4 +74,36 @@ describe('InMemoryEventStore', () => {
     assert.deepEqual(again?.payload, { messageId: 'event-1' });
     assert.equal(again?.timestamp.getUTCFullYear(), 2026);
   });
+
+  it('rejects causation that is not an earlier stored event', () => {
+    const store = new InMemoryEventStore();
+    assert.throws(
+      () =>
+        store.append(
+          createEvent({
+            id: 'orphan',
+            type: 'DELIVERY_CONFIRMED',
+            causationEventId: 'missing',
+            timestamp: new Date('2026-09-15T18:02:00.000Z'),
+          }),
+        ),
+      EventError,
+    );
+  });
+
+  it('accepts causation to an earlier event in the same debate', () => {
+    const store = new InMemoryEventStore();
+    store.append(sample('event-1', 'debate-1'));
+    store.append(
+      createEvent({
+        id: 'event-2',
+        type: 'MESSAGE_DISPATCHED',
+        debateId: 'debate-1',
+        causationEventId: 'event-1',
+        correlationId: 'message:event-1',
+        timestamp: new Date('2026-09-15T18:03:00.000Z'),
+      }),
+    );
+    assert.equal(store.getById('event-2')?.causationEventId, 'event-1');
+  });
 });

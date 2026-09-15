@@ -52,3 +52,9 @@ export {
   type ReplayWarning,
   type ReplayWarningCode,
 } from './event-replayer.js';
+export {
+  classifyExternalActions,
+  type ExternalActionKind,
+  type ExternalActionRecovery,
+  type ExternalActionState,
+} from './external-action-recovery.js';

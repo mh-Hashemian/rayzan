@@ -18,11 +18,28 @@ describe('Event model', () => {
 
     assert.equal(event.id, 'event-1');
     assert.equal(event.type, 'DEBATE_CREATED');
+    assert.equal(event.schemaVersion, 1);
     assert.equal(event.debateId, 'debate-1');
     assert.deepEqual(event.payload, { topic: 'Storage choice' });
     assert.equal(event.timestamp.toISOString(), timestamp.toISOString());
     assert.equal('provider' in event, false);
+    assert.equal('causationEventId' in event, false);
     assert.ok(EVENT_TYPES.includes(event.type));
+  });
+
+  it('preserves explicit legacy schema version and causal fields', () => {
+    const event = createEvent({
+      id: 'event-2',
+      type: 'DELIVERY_CONFIRMED',
+      schemaVersion: 0,
+      debateId: 'debate-1',
+      causationEventId: 'event-1',
+      correlationId: 'delivery:del-1',
+      timestamp: new Date('2026-09-15T18:01:00.000Z'),
+    });
+    assert.equal(event.schemaVersion, 0);
+    assert.equal(event.causationEventId, 'event-1');
+    assert.equal(event.correlationId, 'delivery:del-1');
   });
 
   it('rejects an empty id and an invalid type', () => {

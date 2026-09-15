@@ -200,6 +200,8 @@ export interface RayzanSnapshot {
   readonly lastError?: string;
   readonly log: readonly string[];
   readonly eventLog: readonly string[];
+  readonly eventDetails: readonly string[];
+  readonly externalActionRecovery: readonly string[];
   readonly messages: readonly {
     readonly id: string;
     readonly senderId: string;
@@ -294,6 +296,7 @@ export class RayzanRuntime {
     this.agents.register(agent);
     this.#emit('AGENT_REGISTERED', {
       agentId: agent.id,
+      correlationId: `agent:${agent.id}`,
       payload: { id: agent.id, name: agent.name, role: agent.role },
     });
     this.#record(`Registered ${agent.name} as ${agent.role} (${agent.id}).`);
@@ -334,8 +337,9 @@ export class RayzanRuntime {
         status: 'active',
       }),
     );
-    this.#emit('DEBATE_CREATED', {
+    const debateEvent = this.#emit('DEBATE_CREATED', {
       debateId,
+      correlationId: `debate:${debateId}`,
       payload: { topic: trimmed, status: 'active' },
     });
     this.rounds.create(
@@ -348,6 +352,8 @@ export class RayzanRuntime {
     this.#emit('ROUND_CREATED', {
       debateId,
       roundId,
+      causationEventId: debateEvent.id,
+      correlationId: `round:${roundId}`,
       payload: {
         number: 1,
         participantIds: watchers.map((watcher) => watcher.id),
@@ -512,6 +518,32 @@ export class RayzanRuntime {
     });
     if (phase === 'error' && error) {
       this.#lastError = `${agent.name}: ${error}`;
+    }
+    if (
+      !this.#restoredFromHistory &&
+      capture?.phase === 'failed' &&
+      capture.deliveryId
+    ) {
+      const delivery = this.transport.getDelivery(asDeliveryId(capture.deliveryId));
+      const reason = capture.reason ?? error ?? 'capture failed';
+      if (capture.promptSubmitted === false) {
+        this.orchestrator.failPromptDispatch({
+          deliveryId: capture.deliveryId,
+          recipientId: agent.id,
+          debateId: delivery?.debateId,
+          roundId: delivery?.roundId,
+          messageId: delivery?.messageId,
+          reason,
+        });
+      } else {
+        this.orchestrator.failCapture({
+          deliveryId: capture.deliveryId,
+          recipientId: agent.id,
+          debateId: delivery?.debateId,
+          roundId: delivery?.roundId,
+          reason,
+        });
+      }
     }
     const existing = this.#bindings.get(agent.id);
     if (existing?.available) {
@@ -731,6 +763,8 @@ export class RayzanRuntime {
       ...(this.#lastError ? { lastError: this.#lastError } : {}),
       log: [...this.#log],
       eventLog: this.#eventLog(),
+      eventDetails: this.#eventDetailsLog(),
+      externalActionRecovery: this.#externalActionRecoveryLog(),
       messages: debateRecord
         ? this.messages.listByDebate(debateRecord.id).map((message) => ({
             id: message.id,
@@ -763,6 +797,8 @@ export class RayzanRuntime {
       this.#emit('ROUND_COMPLETED', {
         debateId: round1.debateId,
         roundId: round1.id,
+        causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
+        correlationId: `round:${round1.id}`,
         payload: { number: 1, status: 'completed' },
       });
       this.#record('Round 1 auto-completed after all Watcher responses.');
@@ -790,6 +826,8 @@ export class RayzanRuntime {
       this.#emit('ROUND_COMPLETED', {
         debateId: round2.debateId,
         roundId: round2.id,
+        causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
+        correlationId: `round:${round2.id}`,
         payload: { number: 2, status: 'completed' },
       });
       this.#record('Round 2 auto-completed after all Watcher responses.');
@@ -823,6 +861,8 @@ export class RayzanRuntime {
     this.#emit('ROUND_CREATED', {
       debateId: debate.id,
       roundId: round2Id,
+      causationEventId: this.#lastEventId('ROUND_COMPLETED'),
+      correlationId: `round:${round2Id}`,
       payload: {
         number: 2,
         participantIds: watchers.map((watcher) => watcher.id),
@@ -1059,6 +1099,8 @@ export class RayzanRuntime {
       this.#emit('SYNTHESIS_CREATED', {
         debateId: synthesis.debateId,
         agentId: synthesis.coordinatorId,
+        causationEventId: this.#lastEventId('ROUND_COMPLETED'),
+        correlationId: `debate:${synthesis.debateId}`,
         payload: {
           coordinatorId: synthesis.coordinatorId,
           body: synthesis.body,
@@ -1577,10 +1619,19 @@ export class RayzanRuntime {
       debateId?: string;
       roundId?: string;
       agentId?: string;
+      causationEventId?: string;
+      correlationId?: string;
       payload?: unknown;
     },
-  ): void {
-    recordEvent(this.events, { type, ...input });
+  ): Event {
+    return recordEvent(this.events, { type, ...input });
+  }
+
+  #lastEventId(type: EventType): string | undefined {
+    return this.events
+      .listAll()
+      .filter((event) => event.type === type)
+      .at(-1)?.id;
   }
 
   #eventLog(): readonly string[] {
@@ -1604,7 +1655,16 @@ export class RayzanRuntime {
       lines.push(clock(event.timestamp));
       lines.push(event.type);
       lines.push(`id: ${event.id}`);
+      lines.push(
+        `schema: ${event.schemaVersion === 0 ? 'legacy' : `v${event.schemaVersion}`}`,
+      );
       lines.push(`at: ${event.timestamp.toISOString()}`);
+      if (event.causationEventId !== undefined) {
+        lines.push(`caused by: ${event.causationEventId}`);
+      }
+      if (event.correlationId !== undefined) {
+        lines.push(`correlation: ${event.correlationId}`);
+      }
       if (event.debateId !== undefined) {
         lines.push(event.debateId);
       }
@@ -1647,6 +1707,7 @@ export class RayzanRuntime {
     this.agents.register(operator);
     this.#emit('AGENT_REGISTERED', {
       agentId: operator.id,
+      correlationId: `agent:${operator.id}`,
       payload: { id: operator.id, name: operator.name, role: operator.role },
     });
   }
@@ -1801,6 +1862,49 @@ export class RayzanRuntime {
     } catch {
       return [];
     }
+  }
+
+  #eventDetailsLog(): readonly string[] {
+    const events = this.events.listAll();
+    if (events.length === 0) {
+      return [];
+    }
+    const blocks: string[] = [];
+    for (const event of events) {
+      blocks.push(
+        [
+          event.type,
+          `id: ${event.id}`,
+          `schema: ${event.schemaVersion === 0 ? 'legacy' : `v${event.schemaVersion}`}`,
+          ...(event.causationEventId !== undefined
+            ? [`caused by: ${event.causationEventId}`]
+            : []),
+          ...(event.correlationId !== undefined
+            ? [`correlation: ${event.correlationId}`]
+            : []),
+        ].join('\n'),
+      );
+    }
+    return blocks;
+  }
+
+  #externalActionRecoveryLog(): readonly string[] {
+    const actions = this.#replayResult.externalActions.filter(
+      (action) => action.state === 'IN_DOUBT' || action.state === 'failed',
+    );
+    if (actions.length === 0) {
+      return [];
+    }
+    return actions.map((action) => {
+      const agent = action.agentId
+        ? this.#agentLabel(action.agentId)
+        : 'unknown';
+      return [
+        `${agent} ${action.action.replaceAll('-', ' ')}`,
+        action.state,
+        action.reason,
+      ].join('\n');
+    });
   }
 
   #eventDetail(event: Event): string | undefined {
