@@ -7,7 +7,7 @@
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
-    "test": "tsx --test tests/runtime.test.ts tests/bridge.test.ts"
+    "test": "tsx --test tests/runtime.test.ts tests/bridge.test.ts tests/round2-policy.test.ts"
   },
   "dependencies": {
     "@rayzan/orchestrator": "workspace:*",

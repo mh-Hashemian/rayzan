@@ -41,9 +41,9 @@
 ## Phase 3 — Browser Bridge
 
 - [x] Visible local Rayzan session: Agent registration and Round 1 bootstrap (Checkpoint 3A.1)
-- [ ] Browser extension tab binding and automatic prompt send (Checkpoint 3A.2)
-- [ ] Automatic response capture
-- [ ] Parallel Round 1 close
+- [x] Browser extension tab binding and automatic prompt send (Checkpoint 3A.2)
+- [x] Full Round 1 capture, Coordinator evidence, personalized Round 2 dispatch (Checkpoint 3A.3)
+- [ ] Coordinator final synthesis (Round 2 Watcher capture + Operator report)
 
 ## Later
 

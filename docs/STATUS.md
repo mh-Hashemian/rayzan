@@ -11,14 +11,16 @@ Completed:
 - `@rayzan/transport` abstraction, ManualTransport, delivery lifecycle, BrowserTransport
 - `@rayzan/orchestrator` dispatch, rounds, command parse/execute
 - Checkpoint 3A.1: visible local Agent registration and Round 1 bootstrap (Operator accepted)
+- Checkpoint 3A.2: browser bindings and prompt delivery (`e7c7be5`)
+- Checkpoint 3A.3: Round 1 auto-capture, Coordinator evidence, personalized Round 2 dispatch
 
 Currently being worked on:
 
-- Checkpoint 3A.2 — browser binding and automatic prompt delivery (send only; no capture)
+- Coordinator final synthesis (Round 2 Watcher capture + Operator report)
 
 Next:
 
-- Automatic response capture after 3A.2 is accepted
+- None until Watcher accepts synthesis
 
 Blockers:
 

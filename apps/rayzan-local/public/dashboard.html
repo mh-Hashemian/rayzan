@@ -77,25 +77,54 @@
       <button id="add-agent">Add Agent</button>
       <pre id="agents">(none)</pre>
     </section>
-    <section id="round-create" hidden>
-      <h2>Problem</h2>
+    <section id="round-create">
+      <h2>Start live debate</h2>
+      <p>Operator problem (sent to the Coordinator first):</p>
       <p>
         <textarea id="problem">
-Should Rayzan prefer automatic browser capture over copy/paste?</textarea>
+Should Rayzan use SQLite or PostgreSQL for its future persistent local state?</textarea>
       </p>
+      <p id="round-create-hint"></p>
       <button id="create-round">Create Round 1</button>
+      <button id="run-live">Start live debate</button>
+    </section>
+    <section>
+      <h2>Live Debate</h2>
+      <pre id="timeline">
+Waiting for agents, bindings, and Start live debate.</pre>
     </section>
     <section>
       <h2>Round 1</h2>
-      <pre id="round-status">Waiting for agents and Create Round 1.</pre>
+      <pre id="round-status">
+Waiting for agents and Create Round 1 / Start live debate.</pre>
+      <pre id="round1-agents"></pre>
+    </section>
+    <section>
+      <h2>Round 1 Responses</h2>
+      <pre id="round1-responses">(none yet)</pre>
+    </section>
+    <section>
+      <h2>Coordinator — Round 2 Plan</h2>
+      <pre id="coordinator-plan">(waiting)</pre>
+    </section>
+    <section>
+      <h2>Round 2</h2>
+      <pre id="round2-status">(not started)</pre>
+      <pre id="round2-messages"></pre>
     </section>
     <section>
       <h2>Browser Bindings</h2>
       <p>
-        Bind each chatbot tab with the Rayzan extension, then press
-        <strong>Send Test</strong> here. No copy/paste.
+        Bind each chatbot tab with the Rayzan extension. Use
+        <strong>Start live debate</strong> for the debate.
+        <strong>Send Test</strong>
+        remains a debug control.
       </p>
       <div id="bindings">Waiting for agents…</div>
+    </section>
+    <section>
+      <h2>Browser Capture</h2>
+      <pre id="capture-state">(no capture activity)</pre>
     </section>
     <section>
       <h2>Browser Activity</h2>
@@ -150,10 +179,81 @@ Exposures:
 
       function promptValues() {
         const values = {};
-        for (const box of $('bindings').querySelectorAll('textarea[id^="test-"]')) {
+        for (const box of $('bindings').querySelectorAll(
+          'textarea[id^="test-"]',
+        )) {
           values[box.id] = box.value;
         }
         return values;
+      }
+
+      function captureLabel(capture) {
+        if (!capture || !capture.phase) {
+          return 'Capture:\nidle';
+        }
+        if (capture.phase === 'captured') {
+          return 'Capture:\ncaptured ✓';
+        }
+        if (capture.phase === 'failed') {
+          return (
+            'Capture:\nFAILED\n\nReason:\n' + (capture.reason || 'unknown')
+          );
+        }
+        return 'Capture:\n' + capture.phase;
+      }
+
+      function renderCapture(state) {
+        const agents = (state.agents || []).filter(
+          (a) => a.role !== 'operator',
+        );
+        $('capture-state').textContent = agents.length
+          ? agents
+              .map((a) => {
+                const last = (state.deliveries || [])
+                  .filter((d) => d.recipientId === a.id)
+                  .at(-1);
+                const capture = a.capture || (last && last.capture);
+                const lines = [
+                  a.name,
+                  '',
+                  'Delivery:',
+                  last ? last.status : '(none)',
+                ];
+                if (capture && capture.deliveryId) {
+                  lines.push('Delivery id: ' + capture.deliveryId);
+                }
+                lines.push('');
+                lines.push(captureLabel(capture));
+                if (capture && capture.preSendTurnCount !== undefined) {
+                  lines.push(
+                    'Pre-send assistant turns: ' + capture.preSendTurnCount,
+                  );
+                }
+                if (capture && capture.currentTurnCount !== undefined) {
+                  lines.push(
+                    'Current assistant turns: ' + capture.currentTurnCount,
+                  );
+                }
+                if (capture && capture.trackedIdentity) {
+                  lines.push('Tracked: ' + capture.trackedIdentity);
+                  lines.push(
+                    'Tracked connected: ' +
+                      (capture.trackedConnected ? 'yes' : 'no'),
+                  );
+                }
+                if (capture && capture.textLength !== undefined) {
+                  lines.push('Captured text length: ' + capture.textLength);
+                }
+                if (capture && capture.posted) {
+                  lines.push('Bridge submitResponse: succeeded');
+                }
+                if (a.error) {
+                  lines.push('Error: ' + a.error);
+                }
+                return lines.join('\n');
+              })
+              .join('\n\n----\n\n')
+          : '(no capture activity)';
       }
 
       function deliveryLabel(status) {
@@ -201,17 +301,17 @@ Exposures:
                   ? `<div class="error">Send failed:\n${escapeHtml(b.error)}</div>`
                   : '';
                 const boxId = 'test-' + b.agentId;
-                const prompt =
-                  saved[boxId] ?? defaultTestPrompt(b.name);
+                const prompt = saved[boxId] ?? defaultTestPrompt(b.name);
                 return `<div class="binding-card" data-agent="${escapeHtml(b.agentId)}">
-                    <h3>${escapeHtml(b.name)}</h3>
-                    <pre>Provider: ${escapeHtml(b.provider || '(unknown)')}
-${boundLabel}
-${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDelivery.status))}</pre>
-                    ${fail}
-                    <p>Test prompt:<br><textarea id="${escapeHtml(boxId)}">${escapeHtml(prompt)}</textarea></p>
-                    <button data-send="${escapeHtml(b.agentId)}">Send Test</button>
-                  </div>`;
+                          <h3>${escapeHtml(b.name)}</h3>
+                          <pre>Provider: ${escapeHtml(b.provider || '(unknown)')}
+      ${boundLabel}
+      ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDelivery.status))}
+      ${captureLabel((state.agents || []).find((a) => a.id === b.agentId)?.capture)}</pre>
+                          ${fail}
+                          <p>Test prompt:<br><textarea id="${escapeHtml(boxId)}">${escapeHtml(prompt)}</textarea></p>
+                          <button data-send="${escapeHtml(b.agentId)}">Send Test</button>
+                        </div>`;
               })
               .join('')
           : '<pre>Register Agents above. Send Test appears for each one.</pre>';
@@ -235,10 +335,22 @@ ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDeliver
         );
         const pending =
           holding ||
-          (state.deliveries || []).some((d) => d.status === 'pending');
-        pollTimer = setTimeout(() => {
-          void refresh();
-        }, pending ? 200 : 1000);
+          (state.deliveries || []).some(
+            (d) =>
+              d.status === 'pending' ||
+              d.status === 'delivered' ||
+              (d.capture &&
+                d.capture.phase &&
+                d.capture.phase !== 'captured' &&
+                d.capture.phase !== 'failed' &&
+                d.capture.phase !== 'idle'),
+          );
+        pollTimer = setTimeout(
+          () => {
+            void refresh();
+          },
+          pending ? 200 : 1000,
+        );
       }
 
       function applyState(state) {
@@ -250,28 +362,40 @@ ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDeliver
         $('agents').textContent = agents.length
           ? agents.map((a) => `${a.name}    ${a.role}`).join('\n')
           : '(none)';
-        const canCreate =
-          Boolean(coordinator) && watchers.length >= 1 && !state.sessionStarted;
-        if (canCreate) {
-          $('round-create').removeAttribute('hidden');
-        } else {
-          $('round-create').setAttribute('hidden', '');
-        }
+        const canCreate = Boolean(coordinator) && watchers.length >= 1;
+        const coordinatorCount = agents.filter(
+          (a) => a.role === 'coordinator',
+        ).length;
+        $('round-create-hint').textContent = canCreate
+          ? ''
+          : `Need 1 coordinator and at least 1 watcher. Currently: ${coordinatorCount} coordinator, ${watchers.length} watcher.`;
+        $('create-round').disabled = !canCreate;
+        $('run-live').disabled = !canCreate;
 
         if (!state.debate) {
           $('round-status').textContent =
-            'Waiting for agents and Create Round 1.';
+            'Waiting for agents and Create Round 1 / Start live debate.';
+          $('round1-agents').textContent = '';
         } else {
           const participants = state.participants || [];
           const progress = state.roundProgress;
+          const watchers = (state.agents || []).filter(
+            (a) => a.role === 'watcher',
+          );
           $('round-status').textContent = [
             'Debate',
             `ID: ${state.debate.id}`,
             `Status: ${state.debate.status}`,
             '',
-            `Round ${state.round ? state.round.number : 1}`,
-            `ID: ${state.round ? state.round.id : ''}`,
-            `Status: ${state.round ? state.round.status : ''}`,
+            `Round ${state.round1 ? state.round1.number : 1}`,
+            `ID: ${state.round1 ? state.round1.id : ''}`,
+            `Status: ${
+              state.round1 && state.round1.status === 'completed'
+                ? 'COMPLETED ✓'
+                : state.round1
+                  ? state.round1.status
+                  : ''
+            }`,
             '',
             'Participants',
             participants.length
@@ -281,7 +405,96 @@ ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDeliver
             'Progress',
             progress ? `${progress.responded} / ${progress.expected}` : '0 / 0',
           ].join('\n');
+          $('round1-agents').textContent = watchers
+            .map((a) => {
+              const status = a.round1Status;
+              const capture = a.capture;
+              const label =
+                status === 'responded'
+                  ? 'Responded ✓'
+                  : status === 'generating'
+                    ? capture && capture.phase
+                      ? 'Capture: ' + capture.phase
+                      : 'Generating...'
+                    : status === 'pending'
+                      ? 'Sending...'
+                      : status === 'failed'
+                        ? 'Capture FAILED' +
+                          (capture && capture.reason
+                            ? '\nReason: ' + capture.reason
+                            : '')
+                        : status;
+              return `${a.name}\n${label}`;
+            })
+            .join('\n\n');
         }
+
+        $('timeline').textContent = (state.timeline || []).length
+          ? (state.timeline || []).join('\n')
+          : 'Waiting for agents, bindings, and Start live debate.';
+
+        $('round1-responses').textContent = (state.round1Responses || []).length
+          ? (state.round1Responses || [])
+              .map(
+                (item) =>
+                  `${item.name} — Round 1 Response\n-----------------------\n${item.body}`,
+              )
+              .join('\n\n')
+          : '(none yet)';
+
+        const plan = state.coordinatorPlan;
+        if (plan && plan.parsed) {
+          $('coordinator-plan').textContent = [
+            'COORDINATOR ROUND 2 PLAN',
+            '',
+            'Parsed ✓',
+            '',
+            ...(plan.challenges || []).flatMap((item) => [
+              item.name + ' Challenge',
+              '--------------',
+              item.challenge,
+              '',
+            ]),
+          ].join('\n');
+        } else if (plan && plan.parsed === false) {
+          $('coordinator-plan').textContent = [
+            'Coordinator Command',
+            'PARSE FAILED',
+            plan.error || '',
+            '',
+            'Raw output:',
+            plan.raw || '(empty)',
+          ].join('\n');
+        } else {
+          $('coordinator-plan').textContent = '(waiting)';
+        }
+
+        const round2 = state.round2;
+        const round2Watchers = (state.agents || []).filter(
+          (a) => a.role === 'watcher',
+        );
+        $('round2-status').textContent = round2
+          ? [
+              `Round 2  ${round2.id}  ${round2.status}`,
+              '',
+              ...round2Watchers.map((a) => {
+                const label =
+                  a.round2Status === 'delivered'
+                    ? 'Personalized prompt delivered ✓'
+                    : a.round2Status === 'pending'
+                      ? 'Sending...'
+                      : a.round2Status === 'failed'
+                        ? 'Send failed'
+                        : a.round2Status;
+                return `${a.name}\n${label}`;
+              }),
+            ].join('\n')
+          : '(not started)';
+        $('round2-messages').textContent = (state.round2Messages || []).length
+          ? (state.round2Messages || [])
+              .map((item) => `${item.name}\n----------------\n${item.body}`)
+              .join('\n\n')
+          : '';
 
         const protocol = state.protocol || {
           messages: 0,
@@ -294,9 +507,14 @@ ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDeliver
             ? `${state.debate.id}  status=${state.debate.status}`
             : '(none)',
           '',
-          'Round:',
-          state.round
-            ? `${state.round.id}  number=${state.round.number}  status=${state.round.status}`
+          'Round 1:',
+          state.round1
+            ? `${state.round1.id}  number=${state.round1.number}  status=${state.round1.status}`
+            : '(none)',
+          '',
+          'Round 2:',
+          state.round2
+            ? `${state.round2.id}  number=${state.round2.number}  status=${state.round2.status}`
             : '(none)',
           '',
           'Participants:',
@@ -317,6 +535,7 @@ ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDeliver
         ].join('\n');
         $('error').textContent = state.lastError || '';
         renderBindings(state);
+        renderCapture(state);
         renderActivity(state);
         schedulePoll(state);
       }
@@ -340,6 +559,9 @@ ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDeliver
             }),
           });
           $('agent-name').value = '';
+          if ($('agent-role').value === 'coordinator') {
+            $('agent-role').value = 'watcher';
+          }
         } catch (error) {
           $('error').textContent = error.message;
         }
@@ -356,6 +578,20 @@ ${deliveryLabel(visibleDeliveryStatus(b.agentId, b.lastDelivery && b.lastDeliver
           $('error').textContent = error.message;
         }
         await refresh();
+      };
+      $('run-live').onclick = async () => {
+        try {
+          applyState(
+            await api('/api/session/run-live-round', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ problem: $('problem').value }),
+            }),
+          );
+        } catch (error) {
+          $('error').textContent = error.message;
+          await refresh();
+        }
       };
 
       $('bindings').onclick = async (event) => {

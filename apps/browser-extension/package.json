@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node ./build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/adapters.test.ts"
+    "test": "tsx --test tests/adapters.test.ts tests/capture-machine.test.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

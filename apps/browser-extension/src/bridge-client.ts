@@ -10,6 +10,7 @@ export interface PendingJob {
   readonly deliveryId: string;
   readonly messageId: string;
   readonly body: string;
+  readonly capture?: boolean;
 }
 
 interface BridgeProxyResult<T> {

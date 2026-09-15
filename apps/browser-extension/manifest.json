@@ -34,7 +34,9 @@
         "https://chat.qwen.ai/*",
         "https://chat.z.ai/*"
       ],
-      "js": ["content.js"]
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
     }
   ]
 }

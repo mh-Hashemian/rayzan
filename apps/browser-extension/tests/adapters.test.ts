@@ -4,6 +4,11 @@ import { parseHTML } from 'linkedom';
 
 import { adapterFor } from '../src/adapters/index.js';
 import {
+  clickControl,
+  trackedTurn,
+  turnAfterSnapshot,
+} from '../src/adapters/observe.js';
+import {
   deepSeekAdapter,
   deepSeekAssistantTurns,
   deepSeekExtract,
@@ -15,6 +20,7 @@ import {
   glmAssistantTurns,
   glmExtract,
   glmIsGenerating,
+  glmStopControl,
   glmTurnAfterSnapshot,
 } from '../src/adapters/glm.js';
 import {
@@ -22,6 +28,7 @@ import {
   qwenAssistantTurns,
   qwenExtract,
   qwenIsGenerating,
+  qwenSendControl,
 } from '../src/adapters/qwen.js';
 
 describe('browser adapters', () => {
@@ -62,6 +69,12 @@ describe('browser adapters', () => {
       deepSeekExtract(deepSeekAssistantTurns(done)[0]),
       'Final DeepSeek answer',
     );
+
+    const mixed = parseHTML(`<div>
+      <div class="ds-message"><div class="ds-assistant-message-main-content">assistant</div></div>
+      <div class="d29f3d7d ds-message">user bubble</div>
+    </div>`).document;
+    assert.equal(deepSeekAssistantTurns(mixed).length, 1);
   });
 
   it('Qwen fixture: Stop means generating; phase-answer is the captured text', () => {
@@ -74,6 +87,14 @@ describe('browser adapters', () => {
     assert.equal(qwenAssistantTurns(generating).length, 1);
     assert.equal(qwenIsGenerating(generating), true);
 
+    const leftoverStop = parseHTML(`<div>
+      <div class="qwen-chat-message qwen-chat-message-assistant">
+        <div class="response-message-content t2t phase-answer">Hey there!</div>
+      </div>
+      <button class="stop-button" hidden aria-label="Stop"></button>
+    </div>`).document;
+    assert.equal(qwenIsGenerating(leftoverStop), false);
+
     const done =
       parseHTML(`<div class="qwen-chat-message qwen-chat-message-assistant">
       <div>Thinking completed</div>
@@ -81,6 +102,34 @@ describe('browser adapters', () => {
     </div>`).document;
     assert.equal(qwenIsGenerating(done), false);
     assert.equal(qwenExtract(qwenAssistantTurns(done)[0]), 'Hey there!');
+
+    const voice = parseHTML(`<div class="message-input-right-button-send">
+      <div role="button" aria-label="Voice mode" class="omb__btn"></div>
+    </div>`).document;
+    assert.equal(qwenSendControl(voice), undefined);
+
+    const sendReady = parseHTML(`<div class="message-input-right-button-send">
+      <div class="chat-prompt-send-button">
+        <button class="send-button" aria-label="Send"></button>
+      </div>
+    </div>`).document;
+    assert.equal(
+      qwenSendControl(sendReady)?.getAttribute('aria-label'),
+      'Send',
+    );
+
+    const liveSend = sendReady.querySelector('button.send-button');
+    assert.ok(liveSend);
+    let reactClicks = 0;
+    (
+      liveSend as { __reactProps$test?: { onClick: () => void } }
+    ).__reactProps$test = {
+      onClick: () => {
+        reactClicks += 1;
+      },
+    };
+    clickControl(liveSend as HTMLElement);
+    assert.equal(reactClicks, 1);
   });
 
   it('GLM fixture: extracts assistant text without the thinking chain', () => {
@@ -90,6 +139,13 @@ describe('browser adapters', () => {
     </div>`).document;
     assert.equal(glmAssistantTurns(generating).length, 1);
     assert.equal(glmIsGenerating(generating), true);
+
+    const leftoverStop = parseHTML(`<div>
+      <div class="chat-assistant markdown-prose"><p>Pong from GLM</p></div>
+      <button id="stop-message-button" hidden aria-label="Stop generating"></button>
+    </div>`).document;
+    assert.equal(glmStopControl(leftoverStop), undefined);
+    assert.equal(glmIsGenerating(leftoverStop), false);
 
     const done = parseHTML(`<div class="chat-assistant markdown-prose">
       <div class="thinking-chain-container">Thought Process hidden</div>
@@ -117,6 +173,25 @@ describe('browser adapters', () => {
     assert.equal(
       glmExtract(glmTurnAfterSnapshot(0, newerWithAnswer)),
       'Finished GLM answer',
+    );
+  });
+
+  it('tracks the new assistant turn and does not fall back to an older last message', () => {
+    const root = parseHTML(`<div>
+      <div class="qwen-chat-message-assistant"><div class="response-message-content phase-answer">old</div></div>
+      <div class="qwen-chat-message-assistant"><div class="response-message-content phase-answer">new</div></div>
+    </div>`).document;
+    const turns = qwenAssistantTurns(root);
+    assert.equal(qwenExtract(trackedTurn(turns, 1)), 'new');
+    assert.equal(trackedTurn(turns, 2), undefined);
+    const inplace = qwenAssistantTurns(
+      parseHTML(
+        `<div class="qwen-chat-message-assistant"><div class="response-message-content phase-answer">grown</div></div>`,
+      ).document,
+    );
+    assert.equal(
+      qwenExtract(turnAfterSnapshot(inplace, 1, 'old', qwenExtract)),
+      'grown',
     );
   });
 });

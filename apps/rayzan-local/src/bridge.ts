@@ -73,6 +73,7 @@ export async function handleBridgeRequest(
         phase: typeof body.phase === 'string' ? body.phase : undefined,
         error: typeof body.error === 'string' ? body.error : undefined,
         diagnostics: body.diagnostics,
+        capture: body.capture,
       });
       write(response, 200, { ok: true });
       return true;
@@ -140,10 +141,19 @@ export async function handleBridgeRequest(
     }
     if (
       request.method === 'POST' &&
+      url.pathname === '/api/session/run-live-round'
+    ) {
+      const body = await readJson(request);
+      runtime.runLiveRound1(String(body.problem ?? ''));
+      write(response, 200, runtime.snapshot());
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
       url.pathname === '/api/session/start-round'
     ) {
       const body = await readJson(request);
-      runtime.startRound1(String(body.problem ?? ''));
+      runtime.runLiveRound1(String(body.problem ?? ''));
       write(response, 200, runtime.snapshot());
       return true;
     }

@@ -38,6 +38,53 @@ describe('parseCoordinatorCommandBatch', () => {
     });
   });
 
+  it('treats omitted referencedMessageIds as an empty list', () => {
+    const batch = parseCoordinatorCommandBatch(`{
+  "version": 1,
+  "commands": [
+    {
+      "type": "dispatch",
+      "messageId": "round1-brief",
+      "debateId": "debate-1",
+      "roundId": "round-1",
+      "recipients": { "type": "round-watchers" },
+      "kind": "brief",
+      "body": "Analyze the problem independently."
+    }
+  ]
+}`);
+    const command = batch.commands[0];
+    assert.equal(command?.type, 'dispatch');
+    assert.deepEqual(
+      command?.type === 'dispatch' ? command.referencedMessageIds : undefined,
+      [],
+    );
+  });
+
+  it('still rejects a non-array referencedMessageIds value', () => {
+    assert.throws(
+      () =>
+        parseCoordinatorCommandBatch(
+          JSON.stringify({
+            version: 1,
+            commands: [
+              {
+                type: 'dispatch',
+                messageId: 'round1-brief',
+                debateId: 'debate-1',
+                roundId: 'round-1',
+                recipients: { type: 'round-watchers' },
+                kind: 'brief',
+                body: 'Analyze the problem independently.',
+                referencedMessageIds: 'none',
+              },
+            ],
+          }),
+        ),
+      OrchestratorError,
+    );
+  });
+
   it('preserves ordered Round 2 personalized dispatch commands', () => {
     const batch = parseCoordinatorCommandBatch(
       JSON.stringify({

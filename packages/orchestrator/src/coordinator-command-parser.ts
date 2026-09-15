@@ -197,6 +197,9 @@ function parseReferencedMessageIds(
   value: unknown,
   field: string,
 ): readonly MessageId[] {
+  if (value === undefined || value === null) {
+    return Object.freeze([]);
+  }
   if (!Array.isArray(value)) {
     throw new OrchestratorError(`${field} must be an array`);
   }

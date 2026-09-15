@@ -104,7 +104,7 @@ References are attached to each per-recipient delivery at dispatch and materiali
 
 `RoundWorkflow` tracks mechanical state for one round: who is expected to respond, which deliveries belong to the round, and whether those responses have arrived. Coordinator chooses participants and content. Orchestrator does not decide when another round is needed or whether the debate has converged. All-responses-received is not convergence. A new round is never created automatically.
 
-Documented v1 debate strategy (Round 2 not implemented):
+Documented v1 debate strategy:
 
 ```text
 Round 1: independent parallel Watcher responses
@@ -112,7 +112,7 @@ Round 2: common unfiltered evidence packet + Coordinator personalized challenges
 Then Coordinator synthesis
 ```
 
-Phase 3A implements only Round 1.
+Checkpoint 3A.3 implements Round 1 collection, Coordinator evidence intake, and personalized Round 2 _dispatch_. It does not collect Round 2 responses or run synthesis. Round 2 is bootstrapped in `apps/rayzan-local`, not via a Coordinator `start-round` command.
 
 Protocol `Round` status is reused as:
 

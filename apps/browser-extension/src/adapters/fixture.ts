@@ -1,11 +1,47 @@
 import type {
   AdapterDiagnostics,
   BrowserAdapter,
-  CapturedResponse,
   ConversationSnapshot,
   PromptSendResult,
-  ResponseWaitContext,
 } from './types.js';
+import type { AssistantTurn } from '../capture/types.js';
+import { liveSnapshotFromTurns } from '../capture/turns.js';
+
+function responseBox(): HTMLTextAreaElement | undefined {
+  const box = document.getElementById('response-text');
+  return box instanceof HTMLTextAreaElement ? box : undefined;
+}
+
+function fixtureTurns(): AssistantTurn[] {
+  const box = responseBox();
+  if (box === undefined) {
+    return [];
+  }
+  const text = box.value.trim();
+  if (text.length === 0) {
+    return [];
+  }
+  return [
+    {
+      element: box,
+      identity: 'fixture-response',
+      thinkingOnly: false,
+      hasFinalAnswer: true,
+      finalText: text,
+    },
+  ];
+}
+
+function conversationFromLive(
+  live: ReturnType<typeof liveSnapshotFromTurns>,
+): ConversationSnapshot {
+  return {
+    assistantTurnCount: live.assistantTurnCount,
+    lastAssistantText: live.lastAssistantText,
+    identities: live.identities,
+    lastIncomplete: live.lastIncomplete,
+  };
+}
 
 export const fixtureAdapter: BrowserAdapter = {
   id: 'fixture',
@@ -13,11 +49,17 @@ export const fixtureAdapter: BrowserAdapter = {
   canHandle(url: string): boolean {
     return /\/fixture-chat(?:\?|$)/.test(url);
   },
+  listAssistantTurns(): readonly AssistantTurn[] {
+    return fixtureTurns();
+  },
+  isGenerating(): boolean {
+    return false;
+  },
+  snapshotLive() {
+    return liveSnapshotFromTurns(fixtureTurns());
+  },
   snapshotConversation(): ConversationSnapshot {
-    const box = document.getElementById('response-text');
-    const filled =
-      box instanceof HTMLTextAreaElement && box.value.trim().length > 0;
-    return { assistantTurnCount: filled ? 1 : 0 };
+    return conversationFromLive(this.snapshotLive());
   },
   async sendPrompt(text: string): Promise<PromptSendResult> {
     const snapshot = this.snapshotConversation();
@@ -31,38 +73,20 @@ export const fixtureAdapter: BrowserAdapter = {
     );
     return { snapshot };
   },
-  async waitForResponse(
-    context: ResponseWaitContext,
-  ): Promise<CapturedResponse> {
-    const started = Date.now();
-    const timeoutMs = context.timeoutMs ?? 5000;
-    while (Date.now() - started < timeoutMs) {
-      const box = document.getElementById('response-text');
-      const text = box instanceof HTMLTextAreaElement ? box.value.trim() : '';
-      if (text.length > 0) {
-        return { text };
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    throw new Error('fixture response box stayed empty');
-  },
   async captureLatestResponse(): Promise<string> {
-    const box = document.getElementById('response-text');
-    if (!(box instanceof HTMLTextAreaElement)) {
-      throw new Error('fixture chat response box is missing');
-    }
-    const text = box.value.trim();
-    if (text.length === 0) {
+    const last = fixtureTurns()[0];
+    if (!last || last.finalText.length === 0) {
       throw new Error('fixture response box is empty');
     }
-    return text;
+    return last.finalText;
   },
   diagnostics(): AdapterDiagnostics {
+    const turns = fixtureTurns();
     return {
       provider: 'Rayzan fixture',
       inputFound: document.getElementById('incoming-prompt') !== null,
       sendFound: true,
-      assistantTurns: this.snapshotConversation().assistantTurnCount,
+      assistantTurns: turns.length,
       generating: false,
     };
   },

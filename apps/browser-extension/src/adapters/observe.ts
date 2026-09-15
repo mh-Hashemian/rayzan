@@ -1,6 +1,112 @@
 export const DEFAULT_RESPONSE_TIMEOUT_MS = 180_000;
 export const STABILITY_WINDOW_MS = 2_000;
 
+export function searchRoots(root?: ParentNode): ParentNode[] {
+  const scope =
+    root ?? (typeof document === 'undefined' ? undefined : document);
+  if (scope === undefined) {
+    return [];
+  }
+  if (typeof document === 'undefined' || scope !== document) {
+    return [scope];
+  }
+  const roots: ParentNode[] = [document];
+  for (const iframe of Array.from(document.querySelectorAll('iframe'))) {
+    try {
+      const doc = (iframe as HTMLIFrameElement).contentDocument;
+      if (doc) {
+        roots.push(doc);
+      }
+    } catch {
+      // Cross-origin iframe; a separate content script may handle it.
+    }
+  }
+  return roots;
+}
+
+export function isVisible(element: Element | null | undefined): boolean {
+  if (element === null || element === undefined) {
+    return false;
+  }
+  if (element.getAttribute('hidden') !== null) {
+    return false;
+  }
+  if (element.getAttribute('aria-hidden') === 'true') {
+    return false;
+  }
+  const html = element as HTMLElement;
+  if (html.hidden) {
+    return false;
+  }
+  const view = element.ownerDocument.defaultView;
+  if (view && typeof view.getComputedStyle === 'function') {
+    const style = view.getComputedStyle(element);
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.opacity === '0'
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function collectInRoot(selector: string, root: ParentNode): Element[] {
+  const matches: Element[] = [];
+  const seen = new Set<Element>();
+  const visit = (node: ParentNode) => {
+    for (const element of Array.from(node.querySelectorAll(selector))) {
+      if (!seen.has(element)) {
+        seen.add(element);
+        matches.push(element);
+      }
+    }
+    for (const element of Array.from(node.querySelectorAll('*'))) {
+      if (element.shadowRoot) {
+        visit(element.shadowRoot);
+      }
+    }
+  };
+  visit(root);
+  return matches;
+}
+
+export function queryAll(selector: string, root?: ParentNode): Element[] {
+  return searchRoots(root).flatMap((item) => collectInRoot(selector, item));
+}
+
+export function queryFirst(
+  selector: string,
+  root?: ParentNode,
+): Element | undefined {
+  return queryAll(selector, root)[0];
+}
+
+function observeRoots(observer: MutationObserver, root?: ParentNode): void {
+  for (const item of searchRoots(root)) {
+    const node =
+      item instanceof Document
+        ? item.documentElement
+        : item instanceof Element
+          ? item
+          : undefined;
+    if (node === undefined || node === null) {
+      continue;
+    }
+    try {
+      observer.observe(node, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+      });
+    } catch {
+      // Detached or inert root.
+    }
+  }
+}
+
 export function visibleText(element: Element | null | undefined): string {
   if (element === null || element === undefined) {
     return '';
@@ -9,13 +115,105 @@ export function visibleText(element: Element | null | undefined): string {
   return (html.innerText ?? element.textContent ?? '').trim();
 }
 
+type PageWrapped<T> = T & { wrappedJSObject?: T };
+
+type ReactLikeProps = {
+  onChange?: (event: unknown) => void;
+  onClick?: (event: unknown) => void;
+  onKeyDown?: (event: unknown) => void;
+};
+
+function unwrapPageNode<T extends object>(node: T): T {
+  return (node as PageWrapped<T>).wrappedJSObject ?? node;
+}
+
+function propertyNames(value: object): string[] {
+  const names = new Set<string>();
+  for (const name of Object.keys(value)) {
+    names.add(name);
+  }
+  try {
+    for (const name of Object.getOwnPropertyNames(value)) {
+      names.add(name);
+    }
+  } catch {
+    // Firefox Xray wrappers can throw.
+  }
+  for (const name in value) {
+    names.add(name);
+  }
+  return [...names];
+}
+
+export function reactPropsOf(element: Element): ReactLikeProps | undefined {
+  for (const node of [element, unwrapPageNode(element)]) {
+    const key = propertyNames(node).find((name) =>
+      name.startsWith('__reactProps$'),
+    );
+    if (key === undefined) {
+      continue;
+    }
+    return (node as unknown as Record<string, ReactLikeProps>)[key];
+  }
+  return undefined;
+}
+
+function reactHandlerEvent(
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    preventDefault() {},
+    stopPropagation() {},
+    nativeEvent: { isComposing: false },
+    ...extra,
+  };
+}
+
+function notifyComposerInput(element: HTMLTextAreaElement, text: string): void {
+  const events: Event[] = [];
+  try {
+    events.push(new Event('input', { bubbles: true }));
+  } catch {
+    // Ignore constructor failures.
+  }
+  try {
+    events.push(
+      new InputEvent('input', {
+        bubbles: true,
+        data: text,
+        inputType: 'insertText',
+      }),
+    );
+  } catch {
+    // Ignore constructor failures.
+  }
+  try {
+    events.push(new Event('change', { bubbles: true }));
+  } catch {
+    // Ignore constructor failures.
+  }
+  for (const event of events) {
+    try {
+      element.dispatchEvent(event);
+    } catch {
+      // Firefox Xray: page React cannot read currentTarget on
+      // content-script Events. Native execCommand already notified.
+    }
+  }
+}
+
 export function setComposerValue(
   element: HTMLTextAreaElement,
   text: string,
 ): void {
   element.focus();
   element.select();
-  const inserted = document.execCommand('insertText', false, text);
+  let inserted = false;
+  try {
+    inserted = document.execCommand('insertText', false, text);
+  } catch {
+    // Firefox may deny execCommand; fall through to the value setter.
+  }
   if (!inserted || element.value !== text) {
     const prototype = Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
@@ -26,15 +224,77 @@ export function setComposerValue(
     } else {
       element.value = text;
     }
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        data: text,
-        inputType: 'insertText',
+    notifyComposerInput(element, text);
+  }
+}
+
+export function syncReactComposer(element: HTMLTextAreaElement): void {
+  const onChange = reactPropsOf(element)?.onChange;
+  if (typeof onChange !== 'function') {
+    return;
+  }
+  try {
+    const value = element.value;
+    onChange(
+      reactHandlerEvent({
+        target: { value },
+        currentTarget: { value },
       }),
     );
+  } catch {
+    // Firefox Xray: do not pass DOM nodes into page handlers.
   }
+}
+
+export function clickControl(element: HTMLElement): void {
+  const onClick = reactPropsOf(element)?.onClick;
+  if (typeof onClick === 'function') {
+    try {
+      onClick(reactHandlerEvent());
+      return;
+    } catch {
+      // Fall through to a DOM click.
+    }
+  }
+  try {
+    element.click();
+  } catch {
+    // Firefox may deny untrusted event property access.
+  }
+}
+
+export function pressEnter(element: HTMLElement): void {
+  const onKeyDown = reactPropsOf(element)?.onKeyDown;
+  if (typeof onKeyDown === 'function') {
+    try {
+      onKeyDown(reactHandlerEvent({ key: 'Enter', shiftKey: false }));
+      return;
+    } catch {
+      // Fall through to a DOM keydown.
+    }
+  }
+  try {
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  } catch {
+    // Firefox Xray.
+  }
+}
+
+export async function waitForPaint(): Promise<void> {
+  const raf = globalThis.requestAnimationFrame;
+  if (typeof raf === 'function') {
+    await new Promise<void>((resolve) => {
+      raf(() => raf(() => resolve()));
+    });
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 16));
 }
 
 export async function waitUntil<T>(
@@ -71,12 +331,7 @@ export async function waitUntil<T>(
       }
     };
     const observer = new MutationObserver(tick);
-    observer.observe(document.documentElement, {
-      subtree: true,
-      childList: true,
-      characterData: true,
-      attributes: true,
-    });
+    observeRoots(observer);
     const timer = setInterval(tick, 120);
     tick();
   });
@@ -86,7 +341,26 @@ export function trackedTurn(
   turns: readonly Element[],
   previousCount: number,
 ): Element | undefined {
-  return turns[previousCount] ?? turns.at(-1);
+  if (turns.length <= previousCount) {
+    return undefined;
+  }
+  return turns[previousCount];
+}
+
+export function turnAfterSnapshot(
+  turns: readonly Element[],
+  previousCount: number,
+  lastAssistantText: string | undefined,
+  extract: (turn: Element | undefined) => string,
+): Element | undefined {
+  if (turns.length > previousCount) {
+    return trackedTurn(turns, previousCount);
+  }
+  const last = turns.at(-1);
+  if (last !== undefined && extract(last) !== (lastAssistantText ?? '')) {
+    return last;
+  }
+  return undefined;
 }
 
 export async function waitForStableText(
@@ -120,25 +394,29 @@ export async function waitForStableText(
     const tick = () => {
       const current = read();
       const busy = options.isBusy?.() === true;
-      if (current !== last || busy) {
+      if (current !== last) {
         last = current;
         lastChange = Date.now();
       }
-      if (!busy && current.length > 0 && Date.now() - lastChange >= windowMs) {
+      const stableFor = Date.now() - lastChange;
+      const finishedCleanly =
+        !busy && current.length > 0 && stableFor >= windowMs;
+      const generatingFlagStuck =
+        busy && current.length > 0 && stableFor >= windowMs * 2;
+      if (finishedCleanly || generatingFlagStuck) {
         finish(undefined, current);
         return;
       }
       if (Date.now() - started >= options.timeoutMs) {
+        if (current.length > 0) {
+          finish(undefined, current);
+          return;
+        }
         finish(new Error(options.message));
       }
     };
     const observer = new MutationObserver(tick);
-    observer.observe(document.documentElement, {
-      subtree: true,
-      childList: true,
-      characterData: true,
-      attributes: true,
-    });
+    observeRoots(observer);
     const timer = setInterval(tick, 80);
     tick();
   });

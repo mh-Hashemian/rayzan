@@ -51,16 +51,16 @@ describe('local bridge protocol', () => {
     });
     assert.equal(start.status, 200);
 
-    const watcherPending = (await fetch(
-      `${base}/api/deliveries/pending?agentId=${qwen.id}`,
-    ).then((response) => response.json())) as PendingJobResponse;
-    assert.equal(watcherPending.job, null);
-
     const coordinatorPending = (await fetch(
       `${base}/api/deliveries/pending?agentId=${coordinator.id}`,
     ).then((response) => response.json())) as PendingJobResponse;
     assert.ok(coordinatorPending.job);
     const deliveryId = coordinatorPending.job.deliveryId;
+
+    const watcherPending = (await fetch(
+      `${base}/api/deliveries/pending?agentId=${qwen.id}`,
+    ).then((response) => response.json())) as PendingJobResponse;
+    assert.equal(watcherPending.job, null);
 
     const unknownAck = await fetch(`${base}/api/deliveries/missing/ack`, {
       method: 'POST',

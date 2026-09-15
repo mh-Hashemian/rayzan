@@ -421,3 +421,13 @@ Phase 3A stops after a complete real Round 1. Round 2 is not implemented yet.
 
 Reason:
 The Operator wants a usable Round 1 before any later-round automation.
+
+## DEC-042 — Application-layer Round 2 common evidence and personalized dispatch
+
+Status: Accepted
+
+Decision:
+After Round 1 collection completes, `rayzan-local` auto-closes Round 1, bootstraps Round 2 (Watchers only; not a `start-round` command), and sends the full attributed Round 1 responses to the Coordinator. Parsed Coordinator challenges are not sent as-is. The application prepends one common Round 1 evidence packet to every Watcher Round 2 body and augments `referencedMessageIds` with both Round 1 response IDs if the Coordinator omitted them. Round 2 response collection is out of scope for Checkpoint 3A.3.
+
+Reason:
+Coordinator may choose personalized challenges but must not hide the Round 1 baseline. This policy lives in the MVP application layer, not in `MessageEnvelope`.

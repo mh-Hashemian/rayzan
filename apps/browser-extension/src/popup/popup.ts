@@ -152,4 +152,33 @@ document.getElementById('unbind')?.addEventListener('click', () => {
   })();
 });
 
+document.getElementById('retry-capture')?.addEventListener('click', () => {
+  void sendToTab('retry-capture');
+});
+document.getElementById('manual-capture')?.addEventListener('click', () => {
+  void sendToTab('manual-capture');
+});
+
+async function sendToTab(
+  type: 'retry-capture' | 'manual-capture',
+): Promise<void> {
+  try {
+    const tab = await currentTab();
+    if (tab.id === undefined) {
+      throw new Error('no active tab');
+    }
+    const result = (await chrome.tabs.sendMessage(tab.id, { type })) as
+      { ok?: boolean; error?: string } | undefined;
+    if (result?.ok === false) {
+      throw new Error(result.error ?? type);
+    }
+    await refresh();
+  } catch (error) {
+    if (errorEl) {
+      errorEl.textContent =
+        error instanceof Error ? error.message : String(error);
+    }
+  }
+}
+
 void refresh();
