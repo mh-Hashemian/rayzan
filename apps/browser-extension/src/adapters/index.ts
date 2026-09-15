@@ -1,3 +1,4 @@
+import { chatgptAdapter } from './chatgpt.js';
 import { deepSeekAdapter } from './deepseek.js';
 import { fixtureAdapter } from './fixture.js';
 import { glmAdapter } from './glm.js';
@@ -6,6 +7,7 @@ import type { BrowserAdapter } from './types.js';
 
 const adapters: readonly BrowserAdapter[] = [
   fixtureAdapter,
+  chatgptAdapter,
   deepSeekAdapter,
   qwenAdapter,
   glmAdapter,

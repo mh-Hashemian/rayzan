@@ -44,6 +44,11 @@ export {
   type RoundId,
 } from './ids.js';
 export { ProtocolError } from './validate.js';
+export { createDebateSynthesis, type DebateSynthesis } from './synthesis.js';
+export {
+  InMemorySynthesisStore,
+  type SynthesisStore,
+} from './stores/synthesis-store.js';
 export {
   InMemoryAgentRegistry,
   type AgentRegistry,

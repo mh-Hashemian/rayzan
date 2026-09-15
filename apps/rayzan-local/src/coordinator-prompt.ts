@@ -142,6 +142,92 @@ Return an ordered batch similar to:
 ${input.evidencePacket}`;
 }
 
+export function synthesisEvidencePacket(input: {
+  problem: string;
+  coordinatorBrief?: string;
+  round1Responses: readonly AttributedWatcherResponse[];
+  round2Plan?: readonly { name: string; challenge: string }[];
+  round2Responses: readonly AttributedWatcherResponse[];
+}): string {
+  const round1 = input.round1Responses
+    .map(
+      (response) => `${response.name} Round 1 Response
+=======================
+${response.body}`,
+    )
+    .join('\n\n');
+  const plan =
+    input.round2Plan
+      ?.map(
+        (item) => `${item.name} Round 2 Challenge
+=======================
+${item.challenge}`,
+      )
+      .join('\n\n') || '(none)';
+  const round2 = input.round2Responses
+    .map(
+      (response) => `${response.name} Round 2 Response
+=======================
+${response.body}`,
+    )
+    .join('\n\n');
+  return `Original Operator Problem
+=======================
+${input.problem}
+
+Coordinator Round 1 Brief
+=======================
+${input.coordinatorBrief?.trim() || '(none)'}
+
+${round1}
+
+Coordinator Round 2 Plan
+=======================
+${plan}
+
+${round2}`;
+}
+
+export function coordinatorSynthesisPrompt(input: {
+  coordinatorId: string;
+  debateId: string;
+  evidencePacket: string;
+}): string {
+  return `You are the Rayzan Coordinator for this debate.
+
+Your role = coordinator
+Your agent ID = ${input.coordinatorId}
+Debate ID = ${input.debateId}
+
+Round 1 and Round 2 are complete. This is the final synthesis stage, not a new debate round.
+
+Do not emit JSON commands. Do not dispatch Watchers. Do not start Round 3.
+The Operator decides. You recommend.
+
+Write one complete report the Operator can read without opening any Watcher message.
+
+Use exactly these headings:
+
+Problem:
+Process:
+Consensus:
+Differences:
+Rejected ideas:
+Final recommendation:
+Confidence:
+Suggested next action:
+
+Under Process, include numbered steps covering:
+1. Independent Round 1 analyses
+2. What each Watcher initially proposed
+3. Important arguments from each side
+4. Main disagreements
+5. What Round 2 critique changed or revealed
+6. Points still uncertain
+
+${input.evidencePacket}`;
+}
+
 export function unwrapCoordinatorJson(text: string): string {
   const trimmed = text.trim();
   const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(trimmed);

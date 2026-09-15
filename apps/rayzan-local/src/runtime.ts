@@ -2,12 +2,14 @@ import {
   asAgentId,
   createAgent,
   createDebate,
+  createDebateSynthesis,
   createRound,
   InMemoryAgentRegistry,
   InMemoryDebateStore,
   InMemoryExposureLedgerStore,
   InMemoryMessageStore,
   InMemoryRoundStore,
+  InMemorySynthesisStore,
   type Agent,
   type AgentId,
   type AgentRole,
@@ -32,6 +34,8 @@ import {
 import {
   coordinatorRound1Prompt,
   coordinatorRound2Prompt,
+  coordinatorSynthesisPrompt,
+  synthesisEvidencePacket,
   unwrapCoordinatorJson,
 } from './coordinator-prompt.js';
 import { OPERATOR_ID } from './demo-ids.js';
@@ -171,6 +175,12 @@ export interface RayzanSnapshot {
     readonly name: string;
     readonly body: string;
   }[];
+  readonly synthesis?: {
+    readonly debateId: string;
+    readonly coordinatorId: string;
+    readonly body: string;
+    readonly createdAt: string;
+  };
   readonly lastCommands?: string;
   readonly lastError?: string;
   readonly log: readonly string[];
@@ -211,12 +221,14 @@ export class RayzanRuntime {
     this.workflow,
     this.orchestrator,
   );
+  readonly syntheses = new InMemorySynthesisStore();
 
   #started = false;
   #coordinatorBriefSent = false;
   #round1Dispatched = false;
   #round2Bootstrapped = false;
   #round2Dispatched = false;
+  #synthesisQueued = false;
   #seq = 0;
   #log: string[] = [];
   #lastError: string | undefined;
@@ -575,6 +587,7 @@ export class RayzanRuntime {
       body: response.body,
     }));
     const coordinatorPlan = this.#coordinatorPlanSnapshot();
+    const synthesis = this.#synthesisRecord();
 
     return Object.freeze({
       bridge: 'connected',
@@ -675,6 +688,7 @@ export class RayzanRuntime {
       round1Responses,
       ...(coordinatorPlan ? { coordinatorPlan } : {}),
       round2Messages: this.#round2Messages(),
+      ...(synthesis ? { synthesis } : {}),
       ...(this.#lastCommands ? { lastCommands: this.#lastCommands } : {}),
       ...(this.#lastError ? { lastError: this.#lastError } : {}),
       log: [...this.#log],
@@ -691,6 +705,11 @@ export class RayzanRuntime {
   }
 
   #advanceAfterWatcherResponse(): void {
+    this.#maybeCompleteRound1();
+    this.#maybeCompleteRound2AndSynthesize();
+  }
+
+  #maybeCompleteRound1(): void {
     const round1 = this.#roundByNumber(1);
     if (round1 === undefined || round1.status === 'completed') {
       return;
@@ -703,6 +722,28 @@ export class RayzanRuntime {
       this.workflow.completeRound(round1.id);
       this.#record('Round 1 auto-completed after all Watcher responses.');
       this.#bootstrapRound2AndNotifyCoordinator();
+    } catch {
+      // Collection not ready.
+    }
+  }
+
+  #maybeCompleteRound2AndSynthesize(): void {
+    const round2 = this.#roundByNumber(2);
+    if (
+      round2 === undefined ||
+      round2.status === 'completed' ||
+      !this.#round2Dispatched
+    ) {
+      return;
+    }
+    try {
+      const progress = this.workflow.getRoundProgress(round2.id);
+      if (!progress.complete) {
+        return;
+      }
+      this.workflow.completeRound(round2.id);
+      this.#record('Round 2 auto-completed after all Watcher responses.');
+      this.#queueCoordinatorSynthesis();
     } catch {
       // Collection not ready.
     }
@@ -778,7 +819,11 @@ export class RayzanRuntime {
       this.#handleRound1CoordinatorBrief(text);
       return;
     }
-    this.#handleRound2CoordinatorPlan(text);
+    if (!this.#round2Dispatched) {
+      this.#handleRound2CoordinatorPlan(text);
+      return;
+    }
+    this.#storeCoordinatorSynthesis(text);
   }
 
   #handleRound1CoordinatorBrief(text: string): void {
@@ -897,10 +942,92 @@ export class RayzanRuntime {
     );
   }
 
+  #queueCoordinatorSynthesis(): void {
+    if (this.#synthesisQueued) {
+      return;
+    }
+    const debate = this.#debate();
+    const coordinator = this.#requireSingleCoordinator();
+    const evidencePacket = synthesisEvidencePacket({
+      problem: debate.topic,
+      coordinatorBrief: this.#coordinatorRound1Brief(),
+      round1Responses: this.#round1Responses(),
+      round2Plan: this.#parsedChallenges?.map((challenge) => ({
+        name: challenge.name,
+        challenge: challenge.challenge,
+      })),
+      round2Responses: this.#round2Responses(),
+    });
+    const intent = this.planner.plan(
+      createDispatchPlan({
+        messageId: this.#nextId('msg-coordinator-synthesis'),
+        debateId: debate.id,
+        senderId: OPERATOR_ID,
+        recipients: {
+          type: 'explicit-agents',
+          agentIds: [coordinator.id],
+        },
+        kind: 'input',
+        body: coordinatorSynthesisPrompt({
+          coordinatorId: coordinator.id,
+          debateId: debate.id,
+          evidencePacket,
+        }),
+        referencedMessageIds: [
+          ...this.#round1Responses(),
+          ...this.#round2Responses(),
+        ].map((response) => response.messageId),
+      }),
+    );
+    this.orchestrator.dispatch(intent);
+    this.#synthesisQueued = true;
+    this.#record('Synthesis evidence packet queued for Coordinator.');
+  }
+
+  #storeCoordinatorSynthesis(text: string): void {
+    const debate = this.#debate();
+    if (this.syntheses.getByDebateId(debate.id)) {
+      return;
+    }
+    const coordinator = this.#requireSingleCoordinator();
+    try {
+      const synthesis = createDebateSynthesis({
+        debateId: debate.id,
+        coordinatorId: coordinator.id,
+        body: text,
+        createdAt: new Date().toISOString(),
+      });
+      this.syntheses.store(synthesis);
+      this.debates.update(
+        createDebate({
+          id: debate.id,
+          topic: debate.topic,
+          status: 'completed',
+        }),
+      );
+      this.#lastError = undefined;
+      this.#record('Coordinator final synthesis stored.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#lastError = message;
+      this.#record(`Coordinator synthesis STORE FAILED: ${message}`);
+    }
+  }
+
   #round1Responses(): readonly AttributedWatcherResponse[] {
+    return this.#watcherResponsesForRound(1);
+  }
+
+  #round2Responses(): readonly AttributedWatcherResponse[] {
+    return this.#watcherResponsesForRound(2);
+  }
+
+  #watcherResponsesForRound(
+    number: number,
+  ): readonly AttributedWatcherResponse[] {
     const debate = this.debates.list()[0];
-    const round1 = this.#roundByNumber(1);
-    if (debate === undefined || round1 === undefined) {
+    const round = this.#roundByNumber(number);
+    if (debate === undefined || round === undefined) {
       return [];
     }
     return this.agents.listByRole('watcher').flatMap((watcher) => {
@@ -910,7 +1037,7 @@ export class RayzanRuntime {
           (item) =>
             item.kind === 'response' &&
             item.senderId === watcher.id &&
-            item.roundId === round1.id,
+            item.roundId === round.id,
         );
       return message
         ? [
@@ -923,6 +1050,23 @@ export class RayzanRuntime {
           ]
         : [];
     });
+  }
+
+  #synthesisRecord(): RayzanSnapshot['synthesis'] {
+    const debate = this.debates.list()[0];
+    if (debate === undefined) {
+      return undefined;
+    }
+    const synthesis = this.syntheses.getByDebateId(debate.id);
+    if (synthesis === undefined) {
+      return undefined;
+    }
+    return {
+      debateId: synthesis.debateId,
+      coordinatorId: synthesis.coordinatorId,
+      body: synthesis.body,
+      createdAt: synthesis.createdAt,
+    };
   }
 
   #round2Messages(): readonly { name: string; body: string }[] {
@@ -1071,18 +1215,58 @@ export class RayzanRuntime {
     lines.push('ROUND 2');
     for (const watcher of watchers) {
       const status = this.#round2Status(watcher);
+      const capture = this.#presence.get(watcher.id)?.capture;
       if (status === 'pending') {
         lines.push(`${watcher.name}`);
         lines.push('… Personalized prompt sending');
       }
-      if (status === 'delivered') {
+      if (status === 'generating') {
         lines.push(`${watcher.name}`);
         lines.push('Personalized prompt delivered ✓');
+        if (capture?.phase) {
+          lines.push(`Capture: ${capture.phase}`);
+        }
+      }
+      if (status === 'responded') {
+        lines.push(`${watcher.name}`);
+        lines.push('✓ Round 2 response captured');
       }
       if (status === 'failed') {
         lines.push(`${watcher.name}`);
-        lines.push('✗ Round 2 send failed');
+        lines.push('✗ Round 2 capture failed');
       }
+    }
+    const round2 = this.#roundByNumber(2);
+    const round2Progress = round2 ? this.#safeProgress(round2.id) : undefined;
+    if (round2) {
+      lines.push('Progress');
+      lines.push(
+        round2Progress
+          ? `${round2Progress.responded} / ${round2Progress.expected}`
+          : '0 / 0',
+      );
+      if (round2.status === 'completed') {
+        lines.push('Status');
+        lines.push('COMPLETED ✓');
+      }
+    }
+
+    lines.push('');
+    lines.push('SYNTHESIS');
+    const synthesis = this.#synthesisRecord();
+    const coordinatorSynthesis = coordinatorDeliveries[2];
+    if (this.#synthesisQueued && coordinatorSynthesis?.status === 'pending') {
+      lines.push('… Final report sending');
+    }
+    if (
+      coordinatorSynthesis &&
+      (coordinatorSynthesis.status === 'delivered' ||
+        coordinatorSynthesis.status === 'responded')
+    ) {
+      lines.push('✓ Synthesis prompt delivered');
+    }
+    if (synthesis) {
+      lines.push('✓ Final Coordinator Report stored');
     }
     return Object.freeze(lines);
   }
@@ -1152,12 +1336,15 @@ export class RayzanRuntime {
     const delivery = this.#deliveryFor(agent.id, round2?.id);
     if (
       this.#presence.get(agent.id)?.phase === 'error' &&
-      delivery?.status === 'pending'
+      delivery?.status !== 'responded'
     ) {
       return 'failed';
     }
-    if (delivery?.status === 'delivered' || delivery?.status === 'responded') {
-      return 'delivered';
+    if (delivery?.status === 'responded') {
+      return 'responded';
+    }
+    if (delivery?.status === 'delivered') {
+      return 'generating';
     }
     if (delivery?.status === 'pending') {
       return 'pending';
@@ -1204,8 +1391,6 @@ export class RayzanRuntime {
     if (message === undefined) {
       throw new Error(`missing message for delivery ${delivery.id}`);
     }
-    const round2 = this.#roundByNumber(2);
-    const capture = !(round2 !== undefined && delivery.roundId === round2.id);
     return Object.freeze({
       deliveryId: delivery.id,
       messageId: message.id,
@@ -1213,7 +1398,7 @@ export class RayzanRuntime {
       senderId: delivery.senderId,
       body: message.body,
       kind: message.kind,
-      capture,
+      capture: true,
     });
   }
 

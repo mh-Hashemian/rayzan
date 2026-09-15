@@ -13,14 +13,16 @@ Completed:
 - Checkpoint 3A.1: visible local Agent registration and Round 1 bootstrap (Operator accepted)
 - Checkpoint 3A.2: browser bindings and prompt delivery (`e7c7be5`)
 - Checkpoint 3A.3: Round 1 auto-capture, Coordinator evidence, personalized Round 2 dispatch
+- Coordinator final synthesis: Round 2 Watcher capture + stored Operator report
+- ChatGPT browser adapter: send + auto-capture (`chatgpt.com` / `chat.openai.com`)
 
 Currently being worked on:
 
-- Coordinator final synthesis (Round 2 Watcher capture + Operator report)
+- None (waiting for Watcher review of synthesis and the ChatGPT adapter)
 
 Next:
 
-- None until Watcher accepts synthesis
+- None until Watcher accepts
 
 Blockers:
 

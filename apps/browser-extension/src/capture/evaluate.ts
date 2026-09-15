@@ -56,11 +56,21 @@ export function evaluateCapture(input: {
     input.state.trackedIdentity,
   );
 
-  if (input.state.trackedIdentity && tracked === undefined) {
-    return fail(input, 'tracked-turn-disappeared', false);
-  }
-
   if (tracked === undefined) {
+    if (input.state.trackedIdentity) {
+      return fail(input, 'tracked-turn-disappeared', false);
+    }
+    if (input.observation.generating) {
+      if (input.now - input.state.startedAt >= generationTimeoutMs) {
+        return fail(input, 'generation-timeout', false);
+      }
+      return {
+        phase: 'generating',
+        lastText: input.state.lastText,
+        lastChangeAt: input.state.lastChangeAt,
+        trackedConnected: false,
+      };
+    }
     if (input.now - input.state.startedAt >= newTurnTimeoutMs) {
       return fail(input, 'new-turn-timeout', false);
     }

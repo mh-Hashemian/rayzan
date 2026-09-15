@@ -427,7 +427,17 @@ The Operator wants a usable Round 1 before any later-round automation.
 Status: Accepted
 
 Decision:
-After Round 1 collection completes, `rayzan-local` auto-closes Round 1, bootstraps Round 2 (Watchers only; not a `start-round` command), and sends the full attributed Round 1 responses to the Coordinator. Parsed Coordinator challenges are not sent as-is. The application prepends one common Round 1 evidence packet to every Watcher Round 2 body and augments `referencedMessageIds` with both Round 1 response IDs if the Coordinator omitted them. Round 2 response collection is out of scope for Checkpoint 3A.3.
+After Round 1 collection completes, `rayzan-local` auto-closes Round 1, bootstraps Round 2 (Watchers only; not a `start-round` command), and sends the full attributed Round 1 responses to the Coordinator. Parsed Coordinator challenges are not sent as-is. The application prepends one common Round 1 evidence packet to every Watcher Round 2 body and augments `referencedMessageIds` with both Round 1 response IDs if the Coordinator omitted them. Round 2 Watcher responses are captured. Coordinator final synthesis is a separate debate artifact (`DebateSynthesis`), not another round.
 
 Reason:
 Coordinator may choose personalized challenges but must not hide the Round 1 baseline. This policy lives in the MVP application layer, not in `MessageEnvelope`.
+
+## DEC-043 — Coordinator final synthesis is a debate artifact
+
+Status: Accepted
+
+Decision:
+After Round 2 Watcher responses are captured, Rayzan sends one synthesis packet to the Coordinator (original problem, Round 1 brief, Round 1 responses, Round 2 plan, Round 2 responses). The Coordinator returns a structured Operator report. That report is stored as `DebateSynthesis` (`debateId`, `coordinatorId`, `body`, `createdAt`), not as another debate round and not as the canonical conversation object. Messages remain the audit trail. The Coordinator recommends; the Operator decides. Round 3 is not started.
+
+Reason:
+The Operator should understand the debate from one report without reading Watcher tabs or the raw timeline. Mixing that report into inter-agent `MessageEnvelope` traffic would confuse conversation with conclusion.

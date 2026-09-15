@@ -265,8 +265,8 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     const glmR2 = runtime.nextPendingForAgent(glm.id);
     assert.ok(qwenR2);
     assert.ok(glmR2);
-    assert.equal(qwenR2.capture, false);
-    assert.equal(glmR2.capture, false);
+    assert.equal(qwenR2.capture, true);
+    assert.equal(glmR2.capture, true);
     assert.equal(qwenR2.body, qwenRound2.body);
     assert.equal(glmR2.body, glmRound2.body);
 
@@ -275,11 +275,11 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     const delivered = runtime.snapshot();
     assert.equal(
       delivered.agents.find((agent) => agent.id === qwen.id)?.round2Status,
-      'delivered',
+      'generating',
     );
     assert.equal(
       delivered.agents.find((agent) => agent.id === glm.id)?.round2Status,
-      'delivered',
+      'generating',
     );
     assert.equal(delivered.round1?.status, 'completed');
     assert.match(delivered.timeline.join('\n'), /COMPLETED/);
@@ -350,6 +350,153 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     assert.equal(failed.round2Messages.length, 0);
     assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
     assert.equal(runtime.nextPendingForAgent(glm.id), undefined);
+  });
+
+  it('captures Round 2 replies and stores Coordinator synthesis without Round 3', () => {
+    const runtime = new RayzanRuntime();
+    const { coordinator, qwen, glm } = registerTrio(runtime);
+    runtime.runLiveRound1('SQLite or PostgreSQL?');
+    const started = runtime.snapshot();
+    submitRound1CoordinatorBrief(
+      runtime,
+      coordinator.id,
+      started.debate!.id,
+      started.round1!.id,
+      'Independent brief for Qwen and GLM.',
+    );
+    const qwenR1 = runtime.nextPendingForAgent(qwen.id)!;
+    const glmR1 = runtime.nextPendingForAgent(glm.id)!;
+    runtime.acknowledgeDelivery(qwen.id, qwenR1.deliveryId);
+    runtime.acknowledgeDelivery(glm.id, glmR1.deliveryId);
+    runtime.submitCapturedResponse(qwen.id, qwenR1.deliveryId, 'Qwen: SQLite.');
+    runtime.submitCapturedResponse(
+      glm.id,
+      glmR1.deliveryId,
+      'GLM: PostgreSQL.',
+    );
+    const afterRound1 = runtime.snapshot();
+    const coordinatorPlanJob = runtime.nextPendingForAgent(coordinator.id)!;
+    runtime.acknowledgeDelivery(coordinator.id, coordinatorPlanJob.deliveryId);
+    runtime.submitCapturedResponse(
+      coordinator.id,
+      coordinatorPlanJob.deliveryId,
+      JSON.stringify({
+        version: 1,
+        commands: [
+          {
+            type: 'dispatch',
+            messageId: 'r2-qwen',
+            debateId: afterRound1.debate!.id,
+            roundId: afterRound1.round2!.id,
+            recipients: {
+              type: 'explicit-agents',
+              agentIds: [qwen.id],
+            },
+            kind: 'query',
+            body: 'Challenge Qwen on durability.',
+            referencedMessageIds: [],
+          },
+          {
+            type: 'dispatch',
+            messageId: 'r2-glm',
+            debateId: afterRound1.debate!.id,
+            roundId: afterRound1.round2!.id,
+            recipients: {
+              type: 'explicit-agents',
+              agentIds: [glm.id],
+            },
+            kind: 'query',
+            body: 'Challenge GLM on complexity.',
+            referencedMessageIds: [],
+          },
+        ],
+      }),
+    );
+    const qwenR2 = runtime.nextPendingForAgent(qwen.id)!;
+    const glmR2 = runtime.nextPendingForAgent(glm.id)!;
+    assert.equal(qwenR2.capture, true);
+    runtime.acknowledgeDelivery(qwen.id, qwenR2.deliveryId);
+    runtime.acknowledgeDelivery(glm.id, glmR2.deliveryId);
+    runtime.submitCapturedResponse(
+      qwen.id,
+      qwenR2.deliveryId,
+      'Qwen Round 2: SQLite still, with WAL.',
+    );
+    assert.equal(runtime.nextPendingForAgent(coordinator.id), undefined);
+    runtime.submitCapturedResponse(
+      glm.id,
+      glmR2.deliveryId,
+      'GLM Round 2: PostgreSQL still, managed.',
+    );
+
+    const afterRound2 = runtime.snapshot();
+    assert.equal(afterRound2.round2?.status, 'completed');
+    const synthesisJob = runtime.nextPendingForAgent(coordinator.id);
+    assert.ok(synthesisJob);
+    assert.equal(synthesisJob.capture, true);
+    assert.match(synthesisJob.body, /final synthesis stage/i);
+    assert.match(synthesisJob.body, /Do not start Round 3/);
+    assert.match(synthesisJob.body, /Original Operator Problem/);
+    assert.match(synthesisJob.body, /Independent brief for Qwen and GLM/);
+    assert.match(synthesisJob.body, /Qwen: SQLite/);
+    assert.match(synthesisJob.body, /GLM: PostgreSQL/);
+    assert.match(synthesisJob.body, /Challenge Qwen on durability/);
+    assert.match(synthesisJob.body, /Challenge GLM on complexity/);
+    assert.match(synthesisJob.body, /Qwen Round 2: SQLite still/);
+    assert.match(synthesisJob.body, /GLM Round 2: PostgreSQL still/);
+    assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
+    assert.equal(runtime.nextPendingForAgent(glm.id), undefined);
+
+    runtime.acknowledgeDelivery(coordinator.id, synthesisJob.deliveryId);
+    runtime.submitCapturedResponse(
+      coordinator.id,
+      synthesisJob.deliveryId,
+      `Problem:
+SQLite or PostgreSQL?
+
+Process:
+1. Independent analysis.
+2. Qwen proposed SQLite.
+3. GLM proposed PostgreSQL.
+4. Main disagreement was operational complexity.
+5. Round 2 kept both positions, with more detail.
+
+Consensus:
+Local-first storage matters.
+
+Differences:
+SQLite vs PostgreSQL operations.
+
+Rejected ideas:
+None material.
+
+Final recommendation:
+Start with SQLite.
+
+Confidence:
+Medium.
+
+Suggested next action:
+Prototype the local schema.`,
+    );
+
+    const done = runtime.snapshot();
+    assert.ok(done.synthesis);
+    assert.equal(done.synthesis?.debateId, afterRound2.debate!.id);
+    assert.equal(done.synthesis?.coordinatorId, coordinator.id);
+    assert.match(done.synthesis?.body ?? '', /Final recommendation:/);
+    assert.match(done.synthesis?.body ?? '', /Start with SQLite/);
+    assert.equal(done.debate?.status, 'completed');
+    assert.equal(done.round2?.status, 'completed');
+    assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
+    assert.equal(runtime.nextPendingForAgent(glm.id), undefined);
+    assert.match(done.timeline.join('\n'), /Final Coordinator Report stored/);
+    assert.equal(
+      done.messages.some((message) =>
+        message.body.includes('Start with SQLite'),
+      ),
+      true,
+    );
   });
 });
 

@@ -9,6 +9,14 @@ import {
   turnAfterSnapshot,
 } from '../src/adapters/observe.js';
 import {
+  chatgptAdapter,
+  chatgptAssistantTurns,
+  chatgptExtract,
+  chatgptIsGenerating,
+  chatgptSendControl,
+  chatgptStopControl,
+} from '../src/adapters/chatgpt.js';
+import {
   deepSeekAdapter,
   deepSeekAssistantTurns,
   deepSeekExtract,
@@ -41,8 +49,12 @@ describe('browser adapters', () => {
       adapterFor('https://chat.deepseek.com/a/chat/s/123').id,
       'deepseek',
     );
+    assert.equal(adapterFor('https://chatgpt.com/').id, 'chatgpt');
+    assert.equal(adapterFor('https://chatgpt.com/c/abc').id, 'chatgpt');
+    assert.equal(adapterFor('https://chat.openai.com/').id, 'chatgpt');
     assert.equal(adapterFor('https://chat.qwen.ai/c/guest').id, 'qwen');
     assert.equal(adapterFor('https://chat.z.ai/c/abc').id, 'glm');
+    assert.equal(chatgptAdapter.canHandle('https://chat.qwen.ai/'), false);
     assert.equal(fixtureAdapter.canHandle('https://chat.deepseek.com/'), false);
     assert.equal(
       deepSeekAdapter.canHandle('http://127.0.0.1:8787/fixture-chat'),
@@ -50,7 +62,71 @@ describe('browser adapters', () => {
     );
     assert.equal(qwenAdapter.canHandle('https://chat.z.ai/c/abc'), false);
     assert.equal(glmAdapter.canHandle('https://chat.qwen.ai/'), false);
-    assert.throws(() => adapterFor('https://chat.openai.com/'));
+    assert.throws(() => adapterFor('https://claude.ai/'));
+  });
+
+  it('ChatGPT fixture: Voice is not Send; markdown is captured without thinking', () => {
+    const voice = parseHTML(`<div>
+      <div id="prompt-textarea" contenteditable="true"></div>
+      <button type="button" class="composer-submit-btn composer-submit-button-color" aria-label="Start Voice"></button>
+    </div>`).document;
+    assert.equal(chatgptSendControl(voice), undefined);
+    assert.equal(chatgptIsGenerating(voice), false);
+
+    const sendReady = parseHTML(`<div>
+      <div id="prompt-textarea" contenteditable="true"><p>probe</p></div>
+      <button type="submit" id="composer-submit-button" aria-label="Send prompt" data-testid="send-button"></button>
+    </div>`).document;
+    assert.equal(
+      chatgptSendControl(sendReady)?.getAttribute('aria-label'),
+      'Send prompt',
+    );
+
+    const generating = parseHTML(`<div>
+      <div data-message-author-role="assistant" data-message-id="msg-1">
+        <div class="markdown">partial</div>
+      </div>
+      <button type="button" id="composer-submit-button" data-testid="stop-button" aria-label="Stop streaming"></button>
+    </div>`).document;
+    assert.equal(chatgptAssistantTurns(generating).length, 1);
+    assert.equal(chatgptIsGenerating(generating), true);
+    assert.equal(chatgptSendControl(generating), undefined);
+
+    const leftoverStop = parseHTML(`<div>
+      <div data-message-author-role="assistant" data-message-id="msg-1">
+        <div class="markdown">Done answer</div>
+      </div>
+      <button data-testid="stop-button" hidden aria-label="Stop streaming"></button>
+    </div>`).document;
+    assert.equal(chatgptStopControl(leftoverStop), undefined);
+    assert.equal(chatgptIsGenerating(leftoverStop), false);
+
+    const streamingSection = parseHTML(`<div>
+      <section data-testid="conversation-turn-2" data-turn="user" data-turn-id="u1"></section>
+      <section data-testid="conversation-turn-3" data-turn="assistant" data-turn-id="a-new">
+        <div class="markdown"></div>
+      </section>
+      <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop streaming"></button>
+    </div>`).document;
+    assert.equal(chatgptAssistantTurns(streamingSection).length, 1);
+    assert.equal(chatgptExtract(chatgptAssistantTurns(streamingSection)[0]), '');
+    assert.equal(chatgptIsGenerating(streamingSection), true);
+
+    const done = parseHTML(`<div>
+      <div data-message-author-role="user" data-message-id="u1"><div class="markdown">user</div></div>
+      <section data-testid="conversation-turn-3" data-turn="assistant" data-turn-id="a1">
+        <div data-message-author-role="assistant" data-message-id="a1" data-turn-start-message="true">
+          <div data-testid="thoughts">hidden reasoning</div>
+          <div class="markdown prose">Final ChatGPT answer</div>
+        </div>
+      </section>
+    </div>`).document;
+    assert.equal(chatgptAssistantTurns(done).length, 1);
+    assert.equal(
+      chatgptExtract(chatgptAssistantTurns(done)[0]),
+      'Final ChatGPT answer',
+    );
+    assert.equal(chatgptAdapter.providerLabel, 'ChatGPT');
   });
 
   it('DeepSeek fixture: tracks assistant turns and ignores thinking-only state', () => {

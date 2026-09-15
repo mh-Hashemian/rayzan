@@ -61,7 +61,7 @@ export function selectTrackedTurn(
 
   const known = new Set(snapshot.identities);
   const unknown = turns.filter((turn) => !known.has(turn.identity));
-  if (unknown.length > 0 && unknown.length < turns.length) {
+  if (unknown.length > 0) {
     return unknown.at(-1);
   }
   if (turns.length > snapshot.assistantTurnCount) {
@@ -91,7 +91,7 @@ export function resolveTrackedTurn(
     if (stillThere) {
       return stillThere;
     }
-    return undefined;
+    return selectTrackedTurn(turns, snapshot);
   }
   return selectTrackedTurn(turns, snapshot);
 }

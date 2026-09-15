@@ -228,6 +228,60 @@ export function setComposerValue(
   }
 }
 
+function notifyRichComposerInput(element: HTMLElement, text: string): void {
+  const events: Event[] = [];
+  try {
+    events.push(
+      new InputEvent('input', {
+        bubbles: true,
+        data: text,
+        inputType: 'insertText',
+      }),
+    );
+  } catch {
+    try {
+      events.push(new Event('input', { bubbles: true }));
+    } catch {
+      // Ignore constructor failures.
+    }
+  }
+  for (const event of events) {
+    try {
+      element.dispatchEvent(event);
+    } catch {
+      // Firefox Xray: page React cannot read currentTarget on
+      // content-script Events. Native execCommand already notified.
+    }
+  }
+}
+
+export function richComposerText(element: HTMLElement | undefined): string {
+  if (element === undefined) {
+    return '';
+  }
+  return (element.innerText ?? element.textContent ?? '').trim();
+}
+
+export function setRichComposerValue(element: HTMLElement, text: string): void {
+  element.focus();
+  let inserted = false;
+  try {
+    document.execCommand('selectAll', false);
+    inserted = document.execCommand('insertText', false, text);
+  } catch {
+    // Firefox may deny execCommand; fall through to a DOM replace.
+  }
+  if (!inserted || richComposerText(element) !== text.trim()) {
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+    const paragraph = element.ownerDocument.createElement('p');
+    paragraph.textContent = text;
+    element.append(paragraph);
+    notifyRichComposerInput(element, text);
+  }
+}
+
 export function syncReactComposer(element: HTMLTextAreaElement): void {
   const onChange = reactPropsOf(element)?.onChange;
   if (typeof onChange !== 'function') {

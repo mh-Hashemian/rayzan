@@ -8,6 +8,7 @@ import {
   initialCaptureState,
   runCapture,
   selectTrackedTurn,
+  resolveTrackedTurn,
   type AssistantTurn,
   type CaptureSnapshot,
 } from '../src/capture/index.js';
@@ -59,6 +60,27 @@ describe('capture state machine', () => {
     assert.equal(evaluation.phase, 'waiting-for-new-turn');
   });
 
+  it('stays generating when the stop control is visible before a new turn exists', () => {
+    const old = turnFrom('<div>old</div>', { identity: 'idx:0' });
+    const snapshot: CaptureSnapshot = {
+      identities: [old.identity],
+      assistantTurnCount: 1,
+      lastAssistantText: 'old',
+      lastIncomplete: false,
+      elements: new Set([old.element]),
+    };
+    const evaluation = evaluateCapture({
+      snapshot,
+      observation: {
+        turns: [old],
+        generating: true,
+      },
+      state: initialCaptureState(0),
+      now: 1000,
+    });
+    assert.equal(evaluation.phase, 'generating');
+  });
+
   it('selects a new assistant turn after the snapshot', () => {
     const old = turnFrom('<div>old</div>', { identity: 'idx:0' });
     const next = turnFrom('<div>new</div>', { identity: 'idx:1' });
@@ -72,6 +94,40 @@ describe('capture state machine', () => {
     const selected = selectTrackedTurn([old, next], snapshot);
     assert.equal(selected?.identity, 'idx:1');
     assert.equal(selected?.finalText, 'new');
+  });
+
+  it('selects a new identity even when older turns have been virtualized away', () => {
+    const visibleNew = turnFrom('<div>latest</div>', {
+      identity: 'data-message-id:new',
+    });
+    const snapshot: CaptureSnapshot = {
+      identities: ['data-message-id:old-a', 'data-message-id:old-b'],
+      assistantTurnCount: 2,
+      lastAssistantText: 'old-b',
+      lastIncomplete: false,
+    };
+    const selected = selectTrackedTurn([visibleNew], snapshot);
+    assert.equal(selected?.identity, 'data-message-id:new');
+  });
+
+  it('follows a tracked turn when its identity upgrades from idx to a stable id', () => {
+    const old = turnFrom('<div>old</div>', { identity: 'data-message-id:old' });
+    const streaming = turnFrom('<div>partial</div>', { identity: 'idx:1' });
+    const stable = turnFrom('<div>partial</div>', {
+      identity: 'data-message-id:new',
+    });
+    const snapshot: CaptureSnapshot = {
+      identities: [old.identity],
+      assistantTurnCount: 1,
+      lastAssistantText: 'old',
+      lastIncomplete: false,
+      elements: new Set([old.element]),
+    };
+    assert.equal(
+      resolveTrackedTurn([old, stable], snapshot, streaming.identity)
+        ?.identity,
+      'data-message-id:new',
+    );
   });
 
   it('does not submit a thinking-only turn', () => {

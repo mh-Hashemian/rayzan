@@ -112,7 +112,7 @@ Round 2: common unfiltered evidence packet + Coordinator personalized challenges
 Then Coordinator synthesis
 ```
 
-Checkpoint 3A.3 implements Round 1 collection, Coordinator evidence intake, and personalized Round 2 _dispatch_. It does not collect Round 2 responses or run synthesis. Round 2 is bootstrapped in `apps/rayzan-local`, not via a Coordinator `start-round` command.
+Checkpoint 3A.3 implements Round 1 collection, Coordinator evidence intake, and personalized Round 2 dispatch. Coordinator final synthesis then captures Round 2 Watcher responses and stores a `DebateSynthesis` report. That report is not a `MessageEnvelope` between agents and is not Round 3. Round 2 is bootstrapped in `apps/rayzan-local`, not via a Coordinator `start-round` command.
 
 Protocol `Round` status is reused as:
 
@@ -125,7 +125,7 @@ completed   — completeRound closed the collection
 
 `active` and `collecting` are kept distinct. One round execution may include several canonical messages (global Round 1 or personalized Round 2).
 
-The in-memory stores hold Agents, Debates, Rounds, MessageEnvelopes, and Exposure records. They are temporary memory, not persistence. They do not route messages, expand broadcasts, or advance debate state.
+The in-memory stores hold Agents, Debates, Rounds, MessageEnvelopes, Exposure records, and DebateSynthesis reports. They are temporary memory, not persistence. They do not route messages, expand broadcasts, or advance debate state.
 
 Broadcast or group addressing is expanded into concrete `recipientIds` before a `MessageEnvelope` is stored.
 

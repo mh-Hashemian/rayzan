@@ -89,6 +89,10 @@ Should Rayzan use SQLite or PostgreSQL for its future persistent local state?</t
       <button id="run-live">Start live debate</button>
     </section>
     <section>
+      <h2>Final Coordinator Report</h2>
+      <pre id="synthesis">(waiting for Round 1, Round 2, and synthesis)</pre>
+    </section>
+    <section>
       <h2>Live Debate</h2>
       <pre id="timeline">
 Waiting for agents, bindings, and Start live debate.</pre>
@@ -433,6 +437,10 @@ Exposures:
           ? (state.timeline || []).join('\n')
           : 'Waiting for agents, bindings, and Start live debate.';
 
+        $('synthesis').textContent = state.synthesis
+          ? ['FINAL COORDINATOR REPORT', '', state.synthesis.body].join('\n')
+          : '(waiting for Round 1, Round 2, and synthesis)';
+
         $('round1-responses').textContent = (state.round1Responses || []).length
           ? (state.round1Responses || [])
               .map(
@@ -479,13 +487,15 @@ Exposures:
               '',
               ...round2Watchers.map((a) => {
                 const label =
-                  a.round2Status === 'delivered'
-                    ? 'Personalized prompt delivered ✓'
-                    : a.round2Status === 'pending'
-                      ? 'Sending...'
-                      : a.round2Status === 'failed'
-                        ? 'Send failed'
-                        : a.round2Status;
+                  a.round2Status === 'responded'
+                    ? 'Round 2 response captured ✓'
+                    : a.round2Status === 'generating'
+                      ? 'Personalized prompt delivered ✓'
+                      : a.round2Status === 'pending'
+                        ? 'Sending...'
+                        : a.round2Status === 'failed'
+                          ? 'Capture failed'
+                          : a.round2Status;
                 return `${a.name}\n${label}`;
               }),
             ].join('\n')
@@ -516,6 +526,9 @@ Exposures:
           state.round2
             ? `${state.round2.id}  number=${state.round2.number}  status=${state.round2.status}`
             : '(none)',
+          '',
+          'Synthesis:',
+          state.synthesis ? 'stored' : '(none)',
           '',
           'Participants:',
           (state.participants || []).length
