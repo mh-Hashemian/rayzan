@@ -10,3 +10,10 @@ export function defaultEventDatabasePath(): string {
   );
   return path.join(packageRoot, EVENT_DATABASE_RELATIVE_PATH);
 }
+
+export function resolveEventDatabasePath(explicit?: string): string {
+  if (explicit !== undefined && explicit.trim().length > 0) {
+    return path.resolve(explicit);
+  }
+  return defaultEventDatabasePath();
+}

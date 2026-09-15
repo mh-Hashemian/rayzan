@@ -8,6 +8,10 @@ dist
 Thumbs.db
 *.log
 
+dist-electron
+release
+out
+
 # Local SQLite event log (checkpoint 3B.2)
 apps/rayzan-local/data/
 *.sqlite

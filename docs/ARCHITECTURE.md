@@ -13,7 +13,8 @@ rayzan/
 │   ├── transport/       # ManualTransport + provider-independent BrowserTransport
 │   └── orchestrator/    # stores, routing, command parse/execute, event replay
 ├── apps/
-│   ├── rayzan-local/    # composition root, dashboard, HTTP bridge, fixture chat
+│   ├── rayzan-local/    # composition root, HTTP bridge, debug dashboard, CLI
+│   ├── rayzan-desktop/  # Electron + React product shell
 │   └── browser-extension/
 └── docs/
 ```
@@ -26,7 +27,7 @@ Purpose: immutable history of system evolution.
 
 Events record what happened. They do not decide meaning. There is no AI analysis, sentiment, agreement detection, or position extraction in this layer. The Coordinator remains responsible for semantic interpretation.
 
-Current production implementation (`pnpm start:local`): append-only `SqliteEventStore` at `apps/rayzan-local/data/rayzan.sqlite` (gitignored). Tests inject `InMemoryEventStore` or a temporary SQLite file. SQLite is opened in `apps/rayzan-local` and passed into `RayzanRuntime`; Orchestrator does not create the database.
+Current production CLI (`pnpm start:local`): append-only `SqliteEventStore` at `apps/rayzan-local/data/rayzan.sqlite` (gitignored). Rayzan Desktop uses `<userData>/rayzan.sqlite` via `app.getPath('userData')`. Tests inject `InMemoryEventStore` or a temporary SQLite file. `createRayzanServer({ databasePath, host, port })` is the shared bootstrap; Orchestrator does not create the database.
 
 `listAll()` and `listByDebate()` return events in `sequence` order (`INTEGER PRIMARY KEY AUTOINCREMENT`), not timestamp order. Payloads are stored as JSON. Timestamps are ISO-8601 and reconstructed as the original `Date`. Duplicate event IDs are rejected. There is no update or delete on `EventStore`.
 
@@ -278,3 +279,10 @@ The exposure ledger records protocol-visible exposure through Rayzan as structur
 A Debate tracks identity, topic, and status. Message history belongs in dedicated stores, not inside the Debate object.
 
 A Round is protocol state (`pending`, `active`, `collecting`, `completed`), not a provider conversation.
+
+## Desktop product shell
+
+Rayzan Desktop (`apps/rayzan-desktop`) is the product shell. Electron main starts `createRayzanServer` from `@rayzan/local`, which is the same runtime as `pnpm start:local`. The React UI is a client of the existing localhost HTTP bridge. The browser extension uses that same bridge. There is one runtime, one SQLite file per environment, and one event history.
+
+CLI development keeps `apps/rayzan-local/data/rayzan.sqlite`. The packaged desktop app stores `<userData>/rayzan.sqlite` (on Windows, under `%APPDATA%\Rayzan`). Debug HTML is passed as `publicDir` so the Vite-bundled Electron main process can still serve `/debug`. The engineering dashboard remains at `/debug` and is not the product home screen.
+

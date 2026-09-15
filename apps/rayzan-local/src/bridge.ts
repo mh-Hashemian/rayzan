@@ -3,6 +3,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AGENT_ROLES, type AgentRole } from '@rayzan/protocol';
 
 import { RayzanRuntime } from './runtime.js';
+import { desktopStatus } from './status.js';
+
+export interface BridgeContext {
+  readonly databasePath?: string;
+}
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -16,6 +21,7 @@ export async function handleBridgeRequest(
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
+  context: BridgeContext = {},
 ): Promise<boolean> {
   if (!url.pathname.startsWith('/api/')) {
     return false;
@@ -29,6 +35,10 @@ export async function handleBridgeRequest(
   try {
     if (request.method === 'GET' && url.pathname === '/api/health') {
       write(response, 200, { ok: true });
+      return true;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/status') {
+      write(response, 200, desktopStatus(runtime, context));
       return true;
     }
     if (request.method === 'GET' && url.pathname === '/api/agents') {

@@ -52,9 +52,14 @@
 - [x] Persistent event storage (3B.2 — durable history; replay is 3B.3)
 - [x] State replay / crash recovery (3B.3 — restore projections; do not auto-resume browser jobs or re-dispatch Start live debate)
 - [x] Event contract and causal provenance (3B.4 — versioned envelope, causation/correlation, IN_DOUBT external actions)
+
+## Phase 3C — Product UI
+
+- [x] Rayzan Desktop foundation (3C.1 — Electron shell, shared runtime bootstrap, React status screen)
+- [ ] Agent and browser workspace (3C.2)
 - [ ] Debate Observatory
 - [ ] Operator intervention
-- [ ] React product UI foundation
+- [ ] React product screens after the desktop foundation
 
 ## Later
 

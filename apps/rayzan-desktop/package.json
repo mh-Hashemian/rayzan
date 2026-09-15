@@ -1,0 +1,91 @@
+{
+  "name": "@rayzan/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "description": "Rayzan desktop application",
+  "author": "Rayzan",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "dist": "vite build && electron-builder --win --x64",
+    "rebuild-native": "electron-rebuild -f -w better-sqlite3 --only better-sqlite3",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
+  },
+  "dependencies": {
+    "better-sqlite3": "12.11.1"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "@rayzan/local": "workspace:*",
+    "@types/node": "^20.19.43",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "32.2.8",
+    "electron-builder": "^25.1.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.11",
+    "vite-plugin-electron": "^0.28.8",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  },
+  "build": {
+    "appId": "local.rayzan.desktop",
+    "productName": "Rayzan",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json",
+      {
+        "from": "../../node_modules/.pnpm/better-sqlite3@12.11.1/node_modules/better-sqlite3",
+        "to": "node_modules/better-sqlite3",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../../node_modules/.pnpm/bindings@1.5.0/node_modules/bindings",
+        "to": "node_modules/better-sqlite3/node_modules/bindings",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../../node_modules/.pnpm/file-uri-to-path@1.0.0/node_modules/file-uri-to-path",
+        "to": "node_modules/better-sqlite3/node_modules/file-uri-to-path",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/better-sqlite3/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../rayzan-local/public",
+        "to": "local-public"
+      }
+    ],
+    "npmRebuild": false,
+    "afterPack": "./scripts/after-pack.cjs",
+    "electronVersion": "32.2.8",
+    "forceCodeSigning": false,
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "artifactName": "Rayzan-${version}-win-${arch}.${ext}"
+  }
+}

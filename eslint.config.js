@@ -4,7 +4,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**'],
+    ignores: [
+      '**/dist/**',
+      '**/dist-electron/**',
+      '**/release/**',
+      '**/node_modules/**',
+      'apps/rayzan-desktop/scripts/**',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -24,6 +30,16 @@ export default tseslint.config(
         KeyboardEvent: 'readonly',
         CustomEvent: 'readonly',
         RequestInit: 'readonly',
+      },
+    },
+  },
+  {
+    files: ['apps/rayzan-desktop/src/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        HTMLElement: 'readonly',
       },
     },
   },

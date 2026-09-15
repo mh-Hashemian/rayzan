@@ -511,3 +511,14 @@ External side effects use requested/confirmed/failed lifecycle events. Prompt se
 Reason:
 Browser and other external actions are not replayable. The Operator must see incomplete external work explicitly instead of silent duplication.
 
+## DEC-051 — Rayzan Desktop is an Electron product shell around the existing runtime
+
+Status: Accepted
+
+Decision:
+Rayzan Desktop is an Electron + React + Vite product shell around the existing Node runtime. `createRayzanServer({ databasePath, host, port })` is the shared bootstrap used by `pnpm start:local` and Electron main. Electron is not the domain layer. The packaged app stores SQLite at `app.getPath('userData')/rayzan.sqlite`. CLI development keeps `apps/rayzan-local/data/rayzan.sqlite`. The debug dashboard remains at `/debug`. The React home screen reads `/api/status` and does not duplicate protocol state. `better-sqlite3` is unpacked from ASAR. Electron 32 shares Node 20 ABI 115 with the CLI binary, so packaging copies that native module rather than overwriting the workspace binary. Port 8787 is not silently replaced; if it is occupied by a non-Rayzan process, the UI shows the conflict.
+
+Reason:
+The Operator should launch Rayzan like an application while the debate engine, event log, and browser-extension bridge stay one runtime.
+
+

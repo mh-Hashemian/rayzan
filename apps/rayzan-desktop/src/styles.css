@@ -1,0 +1,94 @@
+:root {
+  color: #1b1b1b;
+  background: #f4f4f1;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+.shell {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+
+.top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 1.5rem;
+}
+
+h1 {
+  letter-spacing: 0.12em;
+  font-size: 1.1rem;
+}
+
+h2 {
+  font-size: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.lede {
+  line-height: 1.45;
+}
+
+.status-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.status-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px dotted #ddd;
+}
+
+.ok {
+  color: #0d6b3c;
+}
+
+.warn {
+  color: #8a4b12;
+}
+
+.error-panel {
+  border: 1px solid #b35c5c;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.actions {
+  margin: 1.5rem 0;
+}
+
+button {
+  font: inherit;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.debug-meta {
+  margin-top: 2rem;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.debug-meta p {
+  margin: 0.25rem 0;
+  word-break: break-all;
+}

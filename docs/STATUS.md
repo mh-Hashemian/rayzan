@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3B.4 — Event contract and causal provenance (waiting for Operator validation)
+Current phase: Phase 3C.1 — Rayzan Desktop foundation (waiting for Operator validation)
 
 Completed:
 
@@ -19,14 +19,16 @@ Completed:
 - Checkpoint 3B.2: SqliteEventStore, `apps/rayzan-local/data/rayzan.sqlite`, dashboard persisted timeline
 - Checkpoint 3B.3: EventReplayer rebuilds in-memory stores from the SQLite event sequence
 - 3B.3 follow-up: restored debates must not re-dispatch Coordinator Round 1
+- Checkpoint 3B.4: versioned event envelope, causal provenance, IN_DOUBT recovery (Operator accepted)
+- Checkpoint 3C.1: Rayzan Desktop foundation (Electron + React shell, shared `createRayzanServer`, waiting for Operator validation)
 
 Currently being worked on:
 
-- None (waiting for Operator validation of 3B.4)
+- None (waiting for Operator validation of 3C.1)
 
 Next:
 
-- React product UI foundation (do not start until 3B.4 is accepted)
+- 3C.2: Agent and browser workspace (do not start until 3C.1 is accepted)
 - Debate Observatory
 - Operator intervention
 
