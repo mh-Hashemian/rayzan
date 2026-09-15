@@ -45,6 +45,14 @@
 - [x] Full Round 1 capture, Coordinator evidence, personalized Round 2 dispatch (Checkpoint 3A.3)
 - [x] Coordinator final synthesis (Round 2 Watcher capture + Operator report)
 
+## Phase 3B — Decision Observatory foundation
+
+- [x] Event model
+- [x] Event store abstraction
+- [ ] Persistent event storage
+- [ ] Debate Observatory
+- [ ] Operator intervention
+
 ## Later
 
 - [ ] Additional provider adapters

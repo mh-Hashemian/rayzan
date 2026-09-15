@@ -93,6 +93,10 @@ Should Rayzan use SQLite or PostgreSQL for its future persistent local state?</t
       <pre id="synthesis">(waiting for Round 1, Round 2, and synthesis)</pre>
     </section>
     <section>
+      <h2>DEBATE EVENTS</h2>
+      <pre id="debate-events">(no events yet)</pre>
+    </section>
+    <section>
       <h2>Live Debate</h2>
       <pre id="timeline">
 Waiting for agents, bindings, and Start live debate.</pre>
@@ -440,6 +444,10 @@ Exposures:
         $('synthesis').textContent = state.synthesis
           ? ['FINAL COORDINATOR REPORT', '', state.synthesis.body].join('\n')
           : '(waiting for Round 1, Round 2, and synthesis)';
+
+        $('debate-events').textContent = (state.eventLog || []).length
+          ? (state.eventLog || []).join('\n')
+          : '(no events yet)';
 
         $('round1-responses').textContent = (state.round1Responses || []).length
           ? (state.round1Responses || [])

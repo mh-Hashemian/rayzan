@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3A — Real browser Round 1 MVP (checkpointed)
+Current phase: Phase 3B.1 — Event store foundation (waiting for Watcher review)
 
 Completed:
 
@@ -15,14 +15,15 @@ Completed:
 - Checkpoint 3A.3: Round 1 auto-capture, Coordinator evidence, personalized Round 2 dispatch
 - Coordinator final synthesis: Round 2 Watcher capture + stored Operator report
 - ChatGPT browser adapter: send + auto-capture (`chatgpt.com` / `chat.openai.com`)
+- Checkpoint 3B.1: append-only event model, InMemoryEventStore, orchestrator emission, debug timeline
 
 Currently being worked on:
 
-- None (waiting for Watcher review of synthesis and the ChatGPT adapter)
+- None (waiting for Watcher review of 3B.1)
 
 Next:
 
-- None until Watcher accepts
+- None until Watcher accepts 3B.1 (persistent storage, Observatory, and Operator intervention are deferred)
 
 Blockers:
 

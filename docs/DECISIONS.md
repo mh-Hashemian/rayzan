@@ -441,3 +441,13 @@ After Round 2 Watcher responses are captured, Rayzan sends one synthesis packet 
 
 Reason:
 The Operator should understand the debate from one report without reading Watcher tabs or the raw timeline. Mixing that report into inter-agent `MessageEnvelope` traffic would confuse conversation with conclusion.
+
+## DEC-046 — Rayzan records system evolution through append-only events
+
+Status: Accepted
+
+Decision:
+Rayzan records system evolution through append-only events. The event log is the source of truth for debate history, future replay, and a visible timeline. Events are generic (`type`, optional `debateId` / `roundId` / `agentId`, `timestamp`, `payload`) and do not carry provider or browser fields. `OPERATOR_INTERVENTION` is a reserved type; intervention behavior is not implemented in 3B.1. The in-memory store is append-only and returns copies. Persistent storage is deferred.
+
+Reason:
+Debate transparency, replay, and auditability require an immutable history of what happened. Semantic interpretation stays with the Coordinator. Events record facts; they do not decide meaning.

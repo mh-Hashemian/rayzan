@@ -1,3 +1,4 @@
+import { recordEvent, type Event, type EventType } from '@rayzan/events';
 import {
   asAgentId,
   createAgent,
@@ -15,6 +16,7 @@ import {
   type AgentRole,
   type Round,
 } from '@rayzan/protocol';
+import { InMemoryEventStore } from '@rayzan/storage';
 import {
   asDeliveryId,
   BrowserTransport,
@@ -184,6 +186,7 @@ export interface RayzanSnapshot {
   readonly lastCommands?: string;
   readonly lastError?: string;
   readonly log: readonly string[];
+  readonly eventLog: readonly string[];
   readonly messages: readonly {
     readonly id: string;
     readonly senderId: string;
@@ -201,11 +204,13 @@ export class RayzanRuntime {
   readonly rounds = new InMemoryRoundStore();
   readonly messages = new InMemoryMessageStore();
   readonly exposures = new InMemoryExposureLedgerStore();
+  readonly events = new InMemoryEventStore();
   readonly transport = new BrowserTransport();
   readonly orchestrator = new Orchestrator(
     this.messages,
     this.exposures,
     this.transport,
+    this.events,
   );
   readonly planner = new DispatchPlanner(this.agents);
   readonly workflow = new RoundWorkflow(
@@ -249,13 +254,16 @@ export class RayzanRuntime {
   >();
 
   constructor() {
-    this.agents.register(
-      createAgent({
-        id: OPERATOR_ID,
-        name: 'Operator',
-        role: 'operator',
-      }),
-    );
+    const operator = createAgent({
+      id: OPERATOR_ID,
+      name: 'Operator',
+      role: 'operator',
+    });
+    this.agents.register(operator);
+    this.#emit('AGENT_REGISTERED', {
+      agentId: operator.id,
+      payload: { name: operator.name, role: operator.role },
+    });
   }
 
   registerAgent(name: string, role: AgentRole): Agent {
@@ -272,6 +280,10 @@ export class RayzanRuntime {
       role,
     });
     this.agents.register(agent);
+    this.#emit('AGENT_REGISTERED', {
+      agentId: agent.id,
+      payload: { name: agent.name, role: agent.role },
+    });
     this.#record(`Registered ${agent.name} as ${agent.role} (${agent.id}).`);
     return agent;
   }
@@ -305,6 +317,10 @@ export class RayzanRuntime {
         status: 'active',
       }),
     );
+    this.#emit('DEBATE_CREATED', {
+      debateId,
+      payload: { topic: trimmed, status: 'active' },
+    });
     this.rounds.create(
       createRound({
         id: roundId,
@@ -312,6 +328,11 @@ export class RayzanRuntime {
         number: 1,
       }),
     );
+    this.#emit('ROUND_CREATED', {
+      debateId,
+      roundId,
+      payload: { number: 1 },
+    });
     this.workflow.startRound({
       roundId,
       participantIds: watchers.map((watcher) => watcher.id),
@@ -692,6 +713,7 @@ export class RayzanRuntime {
       ...(this.#lastCommands ? { lastCommands: this.#lastCommands } : {}),
       ...(this.#lastError ? { lastError: this.#lastError } : {}),
       log: [...this.#log],
+      eventLog: this.#eventLog(),
       messages: debateRecord
         ? this.messages.listByDebate(debateRecord.id).map((message) => ({
             id: message.id,
@@ -720,6 +742,11 @@ export class RayzanRuntime {
         return;
       }
       this.workflow.completeRound(round1.id);
+      this.#emit('ROUND_COMPLETED', {
+        debateId: round1.debateId,
+        roundId: round1.id,
+        payload: { number: 1 },
+      });
       this.#record('Round 1 auto-completed after all Watcher responses.');
       this.#bootstrapRound2AndNotifyCoordinator();
     } catch {
@@ -742,6 +769,11 @@ export class RayzanRuntime {
         return;
       }
       this.workflow.completeRound(round2.id);
+      this.#emit('ROUND_COMPLETED', {
+        debateId: round2.debateId,
+        roundId: round2.id,
+        payload: { number: 2 },
+      });
       this.#record('Round 2 auto-completed after all Watcher responses.');
       this.#queueCoordinatorSynthesis();
     } catch {
@@ -770,6 +802,11 @@ export class RayzanRuntime {
         number: 2,
       }),
     );
+    this.#emit('ROUND_CREATED', {
+      debateId: debate.id,
+      roundId: round2Id,
+      payload: { number: 2 },
+    });
     this.workflow.startRound({
       roundId: round2Id,
       participantIds: watchers.map((watcher) => watcher.id),
@@ -998,6 +1035,11 @@ export class RayzanRuntime {
         createdAt: new Date().toISOString(),
       });
       this.syntheses.store(synthesis);
+      this.#emit('SYNTHESIS_CREATED', {
+        debateId: synthesis.debateId,
+        agentId: synthesis.coordinatorId,
+        payload: { coordinatorId: synthesis.coordinatorId },
+      });
       this.debates.update(
         createDebate({
           id: debate.id,
@@ -1504,6 +1546,79 @@ export class RayzanRuntime {
     return `${prefix}-${this.#seq}`;
   }
 
+  #emit(
+    type: EventType,
+    input: {
+      debateId?: string;
+      roundId?: string;
+      agentId?: string;
+      payload?: unknown;
+    },
+  ): void {
+    recordEvent(this.events, { type, ...input });
+  }
+
+  #eventLog(): readonly string[] {
+    const lines: string[] = [];
+    for (const event of this.events.listAll()) {
+      if (lines.length > 0) {
+        lines.push('');
+      }
+      lines.push(clock(event.timestamp));
+      lines.push(event.type);
+      const detail = this.#eventDetail(event);
+      if (detail !== undefined) {
+        lines.push(detail);
+      }
+    }
+    return lines;
+  }
+
+  #eventDetail(event: Event): string | undefined {
+    const payload = asPayload(event.payload);
+    if (
+      event.type === 'MESSAGE_CREATED' ||
+      event.type === 'MESSAGE_DISPATCHED'
+    ) {
+      const sender = this.#agentLabel(
+        stringField(payload, 'senderId') ?? event.agentId,
+      );
+      const recipients = stringList(payload.recipientIds).map((id) =>
+        this.#agentLabel(id),
+      );
+      if (recipients.length === 0) {
+        return sender;
+      }
+      return `${sender} → ${recipients.join(', ')}`;
+    }
+    if (event.type === 'RESPONSE_CAPTURED') {
+      return this.#agentLabel(
+        stringField(payload, 'senderId') ?? event.agentId,
+      );
+    }
+    if (event.type === 'AGENT_REGISTERED') {
+      const name = stringField(payload, 'name');
+      const role = stringField(payload, 'role');
+      if (name && role) {
+        return `${name} (${role})`;
+      }
+      return this.#agentLabel(event.agentId);
+    }
+    if (event.type === 'SYNTHESIS_CREATED') {
+      return this.#agentLabel(
+        stringField(payload, 'coordinatorId') ?? event.agentId,
+      );
+    }
+    return undefined;
+  }
+
+  #agentLabel(id: string | undefined): string {
+    if (id === undefined || id.trim().length === 0) {
+      return 'unknown';
+    }
+    return this.agents.getById(asAgentId(id))?.name ?? id;
+  }
+
   #record(line: string): void {
     this.#log.push(line);
   }
@@ -1557,4 +1672,34 @@ function asCaptureState(value: unknown): BrowserCaptureState | undefined {
       : {}),
     ...(typeof record.posted === 'boolean' ? { posted: record.posted } : {}),
   };
+}
+
+function clock(timestamp: Date): string {
+  return timestamp.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function asPayload(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function stringField(
+  payload: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = payload[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === 'string');
 }

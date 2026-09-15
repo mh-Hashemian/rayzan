@@ -1,3 +1,4 @@
+import { recordEvent, type EventStore, type EventType } from '@rayzan/events';
 import {
   asMessageId,
   createExposureRecord,
@@ -22,16 +23,53 @@ export class Orchestrator {
     private readonly messages: MessageStore,
     private readonly exposures: ExposureLedgerStore,
     private readonly transport: Transport,
+    private readonly events?: EventStore,
   ) {}
 
   dispatch(intent: DispatchIntent): readonly OutboundDelivery[] {
     const referencedMessageIds = this.#validatedReferences(intent);
+    const message = intent.message;
 
-    this.messages.store(intent.message);
-    const deliveries = this.transport.send(intent.message);
+    this.messages.store(message);
+    this.#emit('MESSAGE_CREATED', {
+      debateId: message.debateId,
+      roundId: message.roundId,
+      agentId: message.senderId,
+      payload: {
+        messageId: message.id,
+        senderId: message.senderId,
+        recipientIds: [...message.recipientIds],
+        kind: message.kind,
+      },
+    });
+
+    const deliveries = this.transport.send(message);
+    this.#emit('MESSAGE_DISPATCHED', {
+      debateId: message.debateId,
+      roundId: message.roundId,
+      agentId: message.senderId,
+      payload: {
+        messageId: message.id,
+        senderId: message.senderId,
+        recipientIds: [...message.recipientIds],
+        kind: message.kind,
+        deliveryIds: deliveries.map((delivery) => delivery.id),
+      },
+    });
 
     for (const delivery of deliveries) {
       this.#deliveryReferences.set(delivery.id, referencedMessageIds);
+      this.#emit('DELIVERY_CREATED', {
+        debateId: delivery.debateId,
+        roundId: delivery.roundId,
+        agentId: delivery.recipientId,
+        payload: {
+          deliveryId: delivery.id,
+          messageId: delivery.messageId,
+          recipientId: delivery.recipientId,
+          status: delivery.status,
+        },
+      });
     }
 
     return deliveries;
@@ -46,8 +84,18 @@ export class Orchestrator {
     }
 
     const delivery = this.transport.markDelivered(deliveryId);
+    this.#emit('DELIVERY_CONFIRMED', {
+      debateId: delivery.debateId,
+      roundId: delivery.roundId,
+      agentId: delivery.recipientId,
+      payload: {
+        deliveryId: delivery.id,
+        messageId: delivery.messageId,
+        recipientId: delivery.recipientId,
+      },
+    });
 
-    this.exposures.record(
+    const exposure = this.exposures.record(
       createExposureRecord({
         id: `exposure:${delivery.id}`,
         agentId: delivery.recipientId,
@@ -59,6 +107,16 @@ export class Orchestrator {
         referencedMessageIds,
       }),
     );
+    this.#emit('EXPOSURE_CREATED', {
+      debateId: exposure.debateId,
+      roundId: exposure.roundId,
+      agentId: exposure.agentId,
+      payload: {
+        exposureId: exposure.id,
+        messageId: exposure.messageId,
+        agentId: exposure.agentId,
+      },
+    });
 
     return delivery;
   }
@@ -66,7 +124,43 @@ export class Orchestrator {
   submitResponse(input: SubmitResponseInput): InboundResponse {
     const inbound = this.transport.submitResponse(input);
     this.messages.store(inbound.message);
+    this.#emit('MESSAGE_CREATED', {
+      debateId: inbound.message.debateId,
+      roundId: inbound.message.roundId,
+      agentId: inbound.message.senderId,
+      payload: {
+        messageId: inbound.message.id,
+        senderId: inbound.message.senderId,
+        recipientIds: [...inbound.message.recipientIds],
+        kind: inbound.message.kind,
+      },
+    });
+    this.#emit('RESPONSE_CAPTURED', {
+      debateId: inbound.message.debateId,
+      roundId: inbound.message.roundId,
+      agentId: inbound.message.senderId,
+      payload: {
+        messageId: inbound.message.id,
+        deliveryId: inbound.deliveryId,
+        senderId: inbound.message.senderId,
+      },
+    });
     return inbound;
+  }
+
+  #emit(
+    type: EventType,
+    input: {
+      debateId?: string;
+      roundId?: string;
+      agentId?: string;
+      payload?: unknown;
+    },
+  ): void {
+    if (this.events === undefined) {
+      return;
+    }
+    recordEvent(this.events, { type, ...input });
   }
 
   #validatedReferences(intent: DispatchIntent): readonly MessageId[] {

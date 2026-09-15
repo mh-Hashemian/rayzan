@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { asDebateId } from '@rayzan/protocol';
+
 import { RayzanRuntime } from '../src/runtime.js';
 
 function registerTrio(runtime: RayzanRuntime) {
@@ -41,6 +43,11 @@ describe('RayzanRuntime Round 1', () => {
     assert.equal(runtime.nextPendingForAgent(coordinator.id), undefined);
     assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
     assert.equal(runtime.nextPendingForAgent(glm.id), undefined);
+    const createdTypes = runtime.events.listAll().map((event) => event.type);
+    assert.equal(createdTypes.includes('AGENT_REGISTERED'), true);
+    assert.equal(createdTypes.includes('DEBATE_CREATED'), true);
+    assert.equal(createdTypes.includes('ROUND_CREATED'), true);
+    assert.match(snap.eventLog.join('\n'), /DEBATE_CREATED/);
   });
 
   it('sends a test message through BrowserTransport pending → delivered only', () => {
@@ -497,6 +504,13 @@ Prototype the local schema.`,
       ),
       true,
     );
+    const eventTypes = runtime.events
+      .listByDebate(asDebateId(done.debate!.id))
+      .map((event) => event.type);
+    assert.equal(eventTypes.includes('MESSAGE_DISPATCHED'), true);
+    assert.equal(eventTypes.includes('RESPONSE_CAPTURED'), true);
+    assert.equal(eventTypes.includes('SYNTHESIS_CREATED'), true);
+    assert.match(done.eventLog.join('\n'), /SYNTHESIS_CREATED/);
   });
 });
 

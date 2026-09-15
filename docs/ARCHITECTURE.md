@@ -8,6 +8,8 @@ This repository is a pnpm TypeScript workspace.
 rayzan/
 ├── packages/
 │   ├── protocol/        # shared protocol/domain model
+│   ├── events/          # append-only event model and EventStore contract
+│   ├── storage/         # in-memory event store (persistent storage later)
 │   ├── transport/       # ManualTransport + provider-independent BrowserTransport
 │   └── orchestrator/    # stores, routing, command parse/execute
 ├── apps/
@@ -18,9 +20,23 @@ rayzan/
 
 `packages/protocol` defines portable debate types, invariants, and in-memory stores. It has no dependency on browsers, UI, databases, networks, or AI providers. It does not deliver messages. It must not import `@rayzan/transport` or `@rayzan/orchestrator`.
 
+## Event Layer
+
+Purpose: immutable history of system evolution.
+
+Events record what happened. They do not decide meaning. There is no AI analysis, sentiment, agreement detection, or position extraction in this layer. The Coordinator remains responsible for semantic interpretation.
+
+Current implementation: in-memory (`InMemoryEventStore`).
+
+Future: persistent append-only storage.
+
+The event log is generic. It does not carry provider or browser fields.
+
+`packages/events` (`@rayzan/events`) depends on `@rayzan/protocol` for branded IDs. `packages/storage` (`@rayzan/storage`) implements `EventStore`. `@rayzan/orchestrator` emits mechanical events; it does not require storage to dispatch.
+
 `packages/transport` (`@rayzan/transport`) depends on `@rayzan/protocol`. It delivers and receives messages. It does not decide debate semantics. It must not import `@rayzan/orchestrator`.
 
-`packages/orchestrator` (`@rayzan/orchestrator`) depends on protocol and transport. Low-level `Orchestrator` is constructed with injected store and transport contracts. It stores canonical messages, asks transport to send and confirm them, records exposure after `delivered`, and stores accepted inbound responses.
+`packages/orchestrator` (`@rayzan/orchestrator`) depends on protocol, transport, and the event store contract. Low-level `Orchestrator` is constructed with injected store, transport, and optional `EventStore` contracts. It stores canonical messages, asks transport to send and confirm them, records exposure after `delivered`, stores accepted inbound responses, and appends mechanical events. Events do not change dispatch behavior.
 
 Rayzan is not the intelligence that conducts a debate. Coordinator, Watchers, and Coder are external agents connected through transports. Rayzan only manages protocol state, routing, deliveries, exposure, correlation, and workflow bookkeeping.
 

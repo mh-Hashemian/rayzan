@@ -10,8 +10,10 @@
     "test": "tsx --test tests/runtime.test.ts tests/bridge.test.ts tests/round2-policy.test.ts"
   },
   "dependencies": {
+    "@rayzan/events": "workspace:*",
     "@rayzan/orchestrator": "workspace:*",
     "@rayzan/protocol": "workspace:*",
+    "@rayzan/storage": "workspace:*",
     "@rayzan/transport": "workspace:*"
   },
   "devDependencies": {

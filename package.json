@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "pnpm --filter @rayzan/protocol --filter @rayzan/transport --filter @rayzan/orchestrator --filter @rayzan/local --filter @rayzan/browser-extension test",
+    "test": "pnpm --filter @rayzan/protocol --filter @rayzan/events --filter @rayzan/storage --filter @rayzan/transport --filter @rayzan/orchestrator --filter @rayzan/local --filter @rayzan/browser-extension test",
     "build:extension": "pnpm --filter @rayzan/browser-extension build",
     "build:local": "pnpm --filter @rayzan/local build",
     "start:local": "pnpm --filter @rayzan/local start"

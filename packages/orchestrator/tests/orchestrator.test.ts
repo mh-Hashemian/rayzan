@@ -9,6 +9,7 @@ import {
   InMemoryExposureLedgerStore,
   InMemoryMessageStore,
 } from '@rayzan/protocol';
+import { InMemoryEventStore } from '@rayzan/storage';
 import { ManualTransport, TransportError } from '@rayzan/transport';
 
 import { createDispatchIntent } from '../src/dispatch-intent.js';
@@ -299,5 +300,78 @@ describe('Orchestrator', () => {
         }),
       OrchestratorError,
     );
+  });
+});
+
+describe('Orchestrator event emission', () => {
+  it('records MESSAGE_DISPATCHED and RESPONSE_CAPTURED without changing dispatch', () => {
+    const events = new InMemoryEventStore();
+    const messages = new InMemoryMessageStore();
+    const exposures = new InMemoryExposureLedgerStore();
+    const transport = new ManualTransport();
+    const orchestrator = new Orchestrator(
+      messages,
+      exposures,
+      transport,
+      events,
+    );
+    const coordinator = createAgent({
+      id: 'coordinator',
+      name: 'Coordinator',
+      role: 'coordinator',
+    });
+    const qwen = createAgent({
+      id: 'watcher-qwen',
+      name: 'Qwen',
+      role: 'watcher',
+    });
+    const debate = createDebate({
+      id: 'debate-1',
+      topic: 'Event emission',
+    });
+    const brief = createMessageEnvelope({
+      id: 'msg-brief',
+      debateId: debate.id,
+      senderId: coordinator.id,
+      recipientIds: [qwen.id],
+      kind: 'brief',
+      body: 'Round 1 brief',
+    });
+
+    const deliveries = orchestrator.dispatch(
+      createDispatchIntent({
+        message: brief,
+        referencedMessageIds: [],
+      }),
+    );
+    const delivery = deliveries[0];
+    assert.ok(delivery);
+
+    assert.deepEqual(
+      events.listByDebate(debate.id).map((event) => event.type),
+      ['MESSAGE_CREATED', 'MESSAGE_DISPATCHED', 'DELIVERY_CREATED'],
+    );
+
+    orchestrator.confirmDelivery(delivery.id);
+    orchestrator.submitResponse({
+      deliveryId: delivery.id,
+      responderId: qwen.id,
+      body: 'Qwen independent analysis',
+    });
+
+    assert.deepEqual(
+      events.listByDebate(debate.id).map((event) => event.type),
+      [
+        'MESSAGE_CREATED',
+        'MESSAGE_DISPATCHED',
+        'DELIVERY_CREATED',
+        'DELIVERY_CONFIRMED',
+        'EXPOSURE_CREATED',
+        'MESSAGE_CREATED',
+        'RESPONSE_CAPTURED',
+      ],
+    );
+    assert.equal(messages.getById(brief.id), brief);
+    assert.equal(exposures.listByAgent(qwen.id).length, 1);
   });
 });

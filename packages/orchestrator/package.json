@@ -14,10 +14,12 @@
     "test": "tsx --test tests/orchestrator.test.ts tests/round-workflow.test.ts tests/dispatch-planner.test.ts tests/coordinator-command-parser.test.ts tests/coordinator-command-executor.test.ts"
   },
   "dependencies": {
+    "@rayzan/events": "workspace:*",
     "@rayzan/protocol": "workspace:*",
     "@rayzan/transport": "workspace:*"
   },
   "devDependencies": {
+    "@rayzan/storage": "workspace:*",
     "tsx": "^4.23.13"
   }
 }
