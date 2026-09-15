@@ -7,10 +7,10 @@
   "description": "Rayzan desktop application",
   "author": "Rayzan",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "dist": "vite build && electron-builder --win --x64",
-    "rebuild-native": "electron-rebuild -f -w better-sqlite3 --only better-sqlite3",
+    "dev": "node scripts/ensure-electron-sqlite.mjs && vite",
+    "build": "node scripts/ensure-electron-sqlite.mjs && vite build",
+    "dist": "node scripts/ensure-electron-sqlite.mjs && vite build && electron-builder --win --x64",
+    "rebuild-native": "node scripts/ensure-electron-sqlite.mjs --force",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
@@ -43,18 +43,8 @@
       "dist-electron/**",
       "package.json",
       {
-        "from": "../../node_modules/.pnpm/better-sqlite3@12.11.1/node_modules/better-sqlite3",
+        "from": ".electron-native/node_modules/better-sqlite3",
         "to": "node_modules/better-sqlite3",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "../../node_modules/.pnpm/bindings@1.5.0/node_modules/bindings",
-        "to": "node_modules/better-sqlite3/node_modules/bindings",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "../../node_modules/.pnpm/file-uri-to-path@1.0.0/node_modules/file-uri-to-path",
-        "to": "node_modules/better-sqlite3/node_modules/file-uri-to-path",
         "filter": ["**/*"]
       }
     ],

@@ -11,6 +11,7 @@ Thumbs.db
 dist-electron
 release
 out
+apps/rayzan-desktop/.electron-native/
 
 # Local SQLite event log (checkpoint 3B.2)
 apps/rayzan-local/data/

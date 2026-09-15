@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3C.1.1 — Debate history + single active debate (waiting for Operator validation)
+Current phase: Phase 3C.1 — Electron better-sqlite3 ABI isolation (waiting for Operator validation)
 
 Completed:
 
@@ -22,10 +22,11 @@ Completed:
 - Checkpoint 3B.4: versioned event envelope, causal provenance, IN_DOUBT recovery (Operator accepted)
 - Checkpoint 3C.1: Rayzan Desktop foundation (Electron + React shell, shared `createRayzanServer`)
 - Checkpoint 3C.1.1: debate history + at most one active debate (waiting for Operator validation)
+- 3C.1 follow-up: isolate Electron better-sqlite3 (ABI 128) from the CLI Node binary (ABI 115)
 
 Currently being worked on:
 
-- None (waiting for Operator validation of 3C.1.1)
+- None (waiting for Operator validation of 3C.1 Electron better-sqlite3 ABI isolation)
 
 Next:
 

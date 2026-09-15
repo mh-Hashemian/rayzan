@@ -23,13 +23,14 @@ Engineering dashboard: `http://127.0.0.1:8787/debug` (Open Workspace).
 
 ## Native SQLite
 
-`better-sqlite3` is pinned to Electron 32 / Node 20 ABI (module version 115), so development can share the CLI native binary. Packaging copies that binary into the app and unpacks it from ASAR. After an Electron major upgrade that changes ABI, rebuild inside a copy of the module rather than overwriting the CLI binary:
+`better-sqlite3` is a native module. Electron 32 uses NODE_MODULE_VERSION 128 even though it embeds Node 20. The CLI/Node workspace binary is ABI 115 and must not be overwritten.
+
+`pnpm desktop:dev` and `pnpm desktop:dist` copy `better-sqlite3` into `apps/rayzan-desktop/.electron-native/` and rebuild that copy for Electron. The workspace CLI binary is left alone. The isolated binary is cached until Electron or `better-sqlite3` versions change. Packaging copies that same isolated tree into the unpacked app so the pnpm CLI binary is not shipped. The Vite dev server binds `127.0.0.1` so Electron can load the renderer on Windows.
 
 ```text
+pnpm desktop:dev
 pnpm --filter @rayzan/desktop rebuild-native
 ```
-
-Do this only when the CLI is not using SQLite (stop `pnpm start:local` first).
 
 ## Packaging (Windows x64)
 

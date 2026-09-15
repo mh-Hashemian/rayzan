@@ -56,6 +56,7 @@
 ## Phase 3C — Product UI
 
 - [x] Rayzan Desktop foundation (3C.1 — Electron shell, shared runtime bootstrap, React status screen)
+- [x] Isolate Electron better-sqlite3 (ABI 128) from CLI Node (ABI 115)
 - [x] Debate history and single active debate (3C.1.1)
 - [ ] Agent and browser workspace (3C.2)
 - [ ] Debate Observatory

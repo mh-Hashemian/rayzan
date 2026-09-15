@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/release/**',
       '**/node_modules/**',
       'apps/rayzan-desktop/scripts/**',
+      'apps/rayzan-desktop/.electron-native/**',
     ],
   },
   eslint.configs.recommended,

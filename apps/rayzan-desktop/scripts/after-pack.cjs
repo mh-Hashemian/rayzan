@@ -1,9 +1,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const SKIP_NATIVE_JUNK = /\.(pdb|iobj|ipdb|exp)$/i;
+
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (SKIP_NATIVE_JUNK.test(entry.name)) {
+      continue;
+    }
     const from = path.join(src, entry.name);
     const to = path.join(dest, entry.name);
     if (entry.isDirectory()) {
@@ -15,20 +20,27 @@ function copyDir(src, dest) {
 }
 
 exports.default = async function afterPack(context) {
-  const pnpm = path.resolve(__dirname, '../../../node_modules/.pnpm');
-  const modules = path.join(
+  const nativeSqlite = path.resolve(
+    __dirname,
+    '../.electron-native/node_modules/better-sqlite3',
+  );
+  const nativeNode = path.join(
+    nativeSqlite,
+    'build',
+    'Release',
+    'better_sqlite3.node',
+  );
+  if (!fs.existsSync(nativeNode)) {
+    throw new Error(
+      `Packaged Electron better-sqlite3 missing isolated binary at ${nativeNode}`,
+    );
+  }
+  const dest = path.join(
     context.appOutDir,
     'resources',
     'app.asar.unpacked',
     'node_modules',
+    'better-sqlite3',
   );
-  const nested = path.join(modules, 'better-sqlite3', 'node_modules');
-  copyDir(
-    path.join(pnpm, 'bindings@1.5.0/node_modules/bindings'),
-    path.join(nested, 'bindings'),
-  );
-  copyDir(
-    path.join(pnpm, 'file-uri-to-path@1.0.0/node_modules/file-uri-to-path'),
-    path.join(nested, 'file-uri-to-path'),
-  );
+  copyDir(nativeSqlite, dest);
 };

@@ -5,6 +5,7 @@ import net from 'node:net';
 
 import { app, BrowserWindow, ipcMain } from 'electron';
 
+import './native-sqlite.js';
 import {
   createRayzanServer,
   LOCAL_BRIDGE_PORT,
@@ -146,8 +147,12 @@ function createMainWindow(): void {
       sandbox: true,
     },
   });
-  const devUrl =
+  const rawDevUrl =
     process.env.VITE_DEV_SERVER_URL ?? process.env.ELECTRON_RENDERER_URL;
+  const devUrl =
+    rawDevUrl === undefined
+      ? undefined
+      : rawDevUrl.replace('://localhost', '://127.0.0.1');
   if (devUrl) {
     void mainWindow.loadURL(devUrl);
   } else {
