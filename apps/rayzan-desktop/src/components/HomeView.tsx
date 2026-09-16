@@ -129,7 +129,12 @@ export function HomeView(input: {
       {input.status.activeDebate ? (
         <section className="block">
           <h2>Current decision</h2>
-          <DebateCard debate={input.status.activeDebate} />
+          <DebateCard
+            debate={input.status.activeDebate}
+            onOpen={() => {
+              input.onNavigate('active-decision');
+            }}
+          />
         </section>
       ) : null}
 

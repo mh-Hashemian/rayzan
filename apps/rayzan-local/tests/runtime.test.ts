@@ -305,6 +305,66 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     assert.equal(qwenR2Message.body.includes('COMMON ROUND 1 EVIDENCE'), true);
   });
 
+  it('accepts the same Coordinator example messageId on a later debate', () => {
+    const runtime = new RayzanRuntime();
+    const { coordinator, qwen, glm } = registerTrio(runtime);
+    runtime.runLiveRound1('First debate with fixed brief id');
+    const first = runtime.snapshot();
+    submitRound1CoordinatorBrief(
+      runtime,
+      coordinator.id,
+      first.debate!.id,
+      first.round1!.id,
+      'First independent brief.',
+    );
+    const firstQwen = runtime.nextPendingForAgent(qwen.id);
+    const firstGlm = runtime.nextPendingForAgent(glm.id);
+    assert.ok(firstQwen);
+    assert.ok(firstGlm);
+    runtime.acknowledgeDelivery(qwen.id, firstQwen.deliveryId);
+    runtime.acknowledgeDelivery(glm.id, firstGlm.deliveryId);
+    runtime.submitCapturedResponse(qwen.id, firstQwen.deliveryId, 'Qwen first');
+    runtime.submitCapturedResponse(glm.id, firstGlm.deliveryId, 'GLM first');
+    runtime.archiveActiveDebate();
+
+    runtime.runLiveRound1('Second debate reuses example messageId');
+    const second = runtime.snapshot();
+    submitRound1CoordinatorBrief(
+      runtime,
+      coordinator.id,
+      second.debate!.id,
+      second.round1!.id,
+      'Second independent brief.',
+    );
+    const qwenJob = runtime.nextPendingForAgent(qwen.id);
+    const glmJob = runtime.nextPendingForAgent(glm.id);
+    assert.ok(qwenJob);
+    assert.ok(glmJob);
+    assert.equal(qwenJob.body, 'Second independent brief.');
+    assert.equal(runtime.snapshot().lastError, undefined);
+    const briefs = runtime
+      .snapshot()
+      .messages.filter((message) => message.kind === 'brief');
+    assert.equal(briefs.length >= 1, true);
+    assert.match(briefs.at(-1)!.id, /^msg-round1-brief-/);
+    assert.notEqual(briefs.at(-1)!.id, 'round1-brief');
+  });
+
+  it('retryCoordinatorDispatch fails closed on bad stored Coordinator JSON', () => {
+    const runtime = new RayzanRuntime();
+    const { coordinator, qwen } = registerTrio(runtime);
+    runtime.runLiveRound1('Need retry after bad JSON');
+    const job = runtime.nextPendingForAgent(coordinator.id);
+    assert.ok(job);
+    runtime.acknowledgeDelivery(coordinator.id, job.deliveryId);
+    runtime.submitCapturedResponse(coordinator.id, job.deliveryId, 'not-json');
+    assert.ok(runtime.snapshot().lastError);
+    assert.equal(runtime.snapshot().canRetryCoordinatorDispatch, true);
+    assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
+    assert.throws(() => runtime.retryCoordinatorDispatch(), /.+/);
+    assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
+  });
+
   it('does not send Round 2 evidence when only one Watcher has responded', () => {
     const runtime = new RayzanRuntime();
     const { coordinator, qwen, glm } = registerTrio(runtime);

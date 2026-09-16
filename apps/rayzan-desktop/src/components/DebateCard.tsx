@@ -33,8 +33,8 @@ export function DebateCard(input: {
   readonly onOpen?: () => void;
 }) {
   const status = input.debate.status;
-  return (
-    <article className="debate-card">
+  const body = (
+    <>
       <div className="debate-copy">
         <h3>{debateTitle(input.debate.topic)}</h3>
         <p className="debate-meta">
@@ -43,11 +43,21 @@ export function DebateCard(input: {
           <span className={`badge ${statusKind(status)}`}>{status}</span>
         </p>
       </div>
-      {input.onOpen ? (
-        <button type="button" className="text-btn" onClick={input.onOpen}>
-          Open
-        </button>
-      ) : null}
-    </article>
+      {input.onOpen ? <span className="debate-open-hint">Open →</span> : null}
+    </>
   );
+
+  if (input.onOpen) {
+    return (
+      <button
+        type="button"
+        className="debate-card debate-card-button"
+        onClick={input.onOpen}
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return <article className="debate-card">{body}</article>;
 }

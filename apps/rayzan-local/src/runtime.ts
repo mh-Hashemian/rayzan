@@ -209,6 +209,7 @@ export interface RayzanSnapshot {
   };
   readonly lastCommands?: string;
   readonly lastError?: string;
+  readonly canRetryCoordinatorDispatch?: boolean;
   readonly log: readonly string[];
   readonly eventLog: readonly string[];
   readonly eventDetails: readonly string[];
@@ -849,6 +850,9 @@ export class RayzanRuntime {
       ...(synthesis ? { synthesis } : {}),
       ...(this.#lastCommands ? { lastCommands: this.#lastCommands } : {}),
       ...(this.#lastError ? { lastError: this.#lastError } : {}),
+      ...(!this.#round1Dispatched && this.#coordinatorCommandText() !== undefined
+        ? { canRetryCoordinatorDispatch: true }
+        : {}),
       log: [...this.#log],
       eventLog: this.#eventLog(),
       eventDetails: this.#eventDetailsLog(),
@@ -1065,6 +1069,25 @@ export class RayzanRuntime {
     }
   }
 
+  /**
+   * Re-run the latest Coordinator Round 1 JSON after a parse/dispatch failure
+   * (for example a reused example messageId from a prior debate).
+   */
+  retryCoordinatorDispatch(): void {
+    this.#requireStarted();
+    if (this.#round1Dispatched) {
+      throw new Error('Round 1 Watcher brief already dispatched');
+    }
+    const text = this.#coordinatorCommandText();
+    if (text === undefined) {
+      throw new Error('No Coordinator response available to retry');
+    }
+    this.#handleCoordinatorResponse(text);
+    if (this.#lastError !== undefined) {
+      throw new Error(this.#lastError);
+    }
+  }
+
   #bindRound1DispatchIds(
     batch: CoordinatorCommandBatch,
   ): CoordinatorCommandBatch {
@@ -1079,12 +1102,33 @@ export class RayzanRuntime {
           }
           return Object.freeze({
             ...command,
+            // Coordinator prompts use a fixed example id; bind a unique one
+            // so later debates do not collide in the append-only message store.
+            messageId: asMessageId(this.#nextId('msg-round1-brief')),
             debateId,
             roundId,
           });
         }),
       ),
     });
+  }
+
+  #coordinatorCommandText(): string | undefined {
+    if (this.#lastCommands !== undefined) {
+      return this.#lastCommands;
+    }
+    const coordinator = this.agents.listByRole('coordinator')[0];
+    const debate = this.#activeDebate();
+    if (coordinator === undefined || debate === undefined) {
+      return undefined;
+    }
+    const responses = this.messages
+      .listByDebate(debate.id)
+      .filter(
+        (message) =>
+          message.senderId === coordinator.id && message.kind === 'response',
+      );
+    return responses.at(-1)?.body;
   }
 
   #dispatchPersonalizedRound2(challenges: readonly WatcherChallenge[]): void {

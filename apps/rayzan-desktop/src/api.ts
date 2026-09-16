@@ -64,6 +64,7 @@ export interface RuntimeDebateState {
     readonly createdAt: string;
   };
   readonly lastError?: string;
+  readonly canRetryCoordinatorDispatch?: boolean;
 }
 
 const ORIGIN = 'http://127.0.0.1:8787';
@@ -106,6 +107,24 @@ export async function startLiveDecision(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ problem }),
   });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    throw new Error(body.error ?? `status ${response.status}`);
+  }
+  return (await response.json()) as RuntimeDebateState;
+}
+
+export async function retryCoordinatorDispatch(): Promise<RuntimeDebateState> {
+  const response = await fetch(
+    `${ORIGIN}/api/session/retry-coordinator-dispatch`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    },
+  );
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as {
       error?: string;

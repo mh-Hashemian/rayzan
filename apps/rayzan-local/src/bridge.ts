@@ -174,6 +174,14 @@ export async function handleBridgeRequest(
     }
     if (
       request.method === 'POST' &&
+      url.pathname === '/api/session/retry-coordinator-dispatch'
+    ) {
+      runtime.retryCoordinatorDispatch();
+      write(response, 200, runtime.snapshot());
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
       url.pathname === '/api/session/change-coordinator'
     ) {
       const body = await readJson(request);
