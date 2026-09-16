@@ -1,6 +1,10 @@
 import { useState } from 'react';
 
-import type { AgentView } from '../../api.js';
+import {
+  composeDecisionProblem,
+  startLiveDecision,
+  type AgentView,
+} from '../../api.js';
 import { DecisionQuestion } from './DecisionQuestion.js';
 import { DecisionReview } from './DecisionReview.js';
 import { TeamSelection } from './TeamSelection.js';
@@ -20,6 +24,11 @@ export function DecisionWizard(input: {
     agentId: string,
     enabled: boolean,
   ) => Promise<void>;
+  readonly onDecisionStarted: (launch: {
+    readonly question: string;
+    readonly coordinatorName: string;
+    readonly watcherNames: readonly string[];
+  }) => void;
 }) {
   const [step, setStep] = useState<WizardStep>('question');
   const [draft, setDraft] = useState<DecisionDraft>(EMPTY_DRAFT);
@@ -66,6 +75,26 @@ export function DecisionWizard(input: {
           team={input.team}
           onBack={() => {
             setStep('team');
+          }}
+          onStart={async () => {
+            const coordinator = input.team.find(
+              (agent) => agent.role === 'coordinator',
+            );
+            const watchers = input.team.filter(
+              (agent) => agent.role === 'watcher' && agent.enabled,
+            );
+            await startLiveDecision(
+              composeDecisionProblem({
+                question: draft.question,
+                context: draft.context,
+                goal: draft.goal,
+              }),
+            );
+            input.onDecisionStarted({
+              question: draft.question.trim(),
+              coordinatorName: coordinator?.name ?? 'Coordinator',
+              watcherNames: watchers.map((agent) => agent.name),
+            });
           }}
         />
       ) : null}

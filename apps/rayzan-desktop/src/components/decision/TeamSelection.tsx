@@ -55,44 +55,39 @@ export function TeamSelection(input: {
       </header>
 
       <div className="wizard-team">
-        <div>
+        <div className="wizard-team-col">
           <h2 className="team-label">Coordinator</h2>
           {coordinator === undefined ? (
             <p className="empty">No coordinator registered.</p>
           ) : (
-            <article className="agent-card wizard-team-card">
-              <div className="agent-card-top">
-                <ProviderLogo
-                  name={coordinator.name}
-                  provider={coordinator.provider}
-                  size={36}
-                />
-                <div>
-                  <p className="agent-role">Coordinator</p>
-                  <h3 className="agent-name">{coordinator.name}</h3>
-                </div>
-              </div>
-              <p className="agent-provider">
-                Provider: {coordinator.provider ?? coordinator.name}
-              </p>
-              <div className="agent-card-footer">
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={() => {
-                    setSelectedId(coordinator.id);
-                    setError(undefined);
-                    setPickerOpen(true);
-                  }}
-                >
-                  Change
-                </button>
-              </div>
+            <article className="wizard-coord-row">
+              <ProviderLogo
+                name={coordinator.name}
+                provider={coordinator.provider}
+                size={28}
+              />
+              <span className="wizard-coord-copy">
+                {coordinator.name}
+                <small>
+                  Provider: {coordinator.provider ?? coordinator.name}
+                </small>
+              </span>
+              <button
+                type="button"
+                className="text-btn"
+                onClick={() => {
+                  setSelectedId(coordinator.id);
+                  setError(undefined);
+                  setPickerOpen(true);
+                }}
+              >
+                Change
+              </button>
             </article>
           )}
         </div>
 
-        <div>
+        <div className="wizard-team-col">
           <h2 className="team-label">Watchers</h2>
           {watchers.length === 0 ? (
             <p className="empty">No watchers registered.</p>

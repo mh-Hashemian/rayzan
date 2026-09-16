@@ -60,7 +60,7 @@
 - [x] Debate history and single active debate (3C.1.1)
 - [x] Product home interface (3C.2 Step 1)
 - [x] Product home refinement (3C.2 Step 1.5 — SSE, logos, coordinator switch)
-- [ ] New Decision wizard (3C.2 Step 2 — UI Steps 1–4; Start Decision pending validation)
+- [x] New Decision wizard (3C.2 Step 2 — UI Steps 1–4 + Start Decision → runtime)
 - [ ] Debate workspace (3C.2 Step 3)
 - [ ] Observatory inside a debate (3C.2 Step 4)
 - [ ] Operator intervention

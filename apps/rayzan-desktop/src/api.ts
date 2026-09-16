@@ -34,6 +34,38 @@ export interface RayzanDesktopStatus {
   readonly debateHistory: readonly DebateView[];
 }
 
+/** Subset of `/api/state` used by the Active Decision workspace. */
+export interface RuntimeDebateState {
+  readonly sessionStarted: boolean;
+  readonly activeDebate?: DebateView;
+  readonly debate?: DebateView;
+  readonly round1?: {
+    readonly id: string;
+    readonly number: number;
+    readonly status: string;
+  };
+  readonly round2?: {
+    readonly id: string;
+    readonly number: number;
+    readonly status: string;
+  };
+  readonly agents: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly role: string;
+    readonly round1Status: string;
+    readonly round2Status: string;
+    readonly enabled: boolean;
+  }[];
+  readonly synthesis?: {
+    readonly debateId: string;
+    readonly coordinatorId: string;
+    readonly body: string;
+    readonly createdAt: string;
+  };
+  readonly lastError?: string;
+}
+
 const ORIGIN = 'http://127.0.0.1:8787';
 
 const STREAM_EVENTS = [
@@ -42,8 +74,11 @@ const STREAM_EVENTS = [
   'COORDINATOR_CHANGED',
   'WATCHER_PARTICIPATION_CHANGED',
   'DELIVERY_CONFIRMED',
+  'MESSAGE_DISPATCHED',
   'RESPONSE_CAPTURED',
   'DEBATE_CREATED',
+  'ROUND_CREATED',
+  'ROUND_COMPLETED',
   'SYNTHESIS_CREATED',
 ] as const;
 
@@ -57,6 +92,27 @@ async function getJson<T>(path: string): Promise<T> {
 
 export async function fetchDesktopStatus(): Promise<RayzanDesktopStatus> {
   return getJson<RayzanDesktopStatus>('/api/status');
+}
+
+export async function fetchRuntimeState(): Promise<RuntimeDebateState> {
+  return getJson<RuntimeDebateState>('/api/state');
+}
+
+export async function startLiveDecision(
+  problem: string,
+): Promise<RuntimeDebateState> {
+  const response = await fetch(`${ORIGIN}/api/session/run-live-round`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ problem }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    throw new Error(body.error ?? `status ${response.status}`);
+  }
+  return (await response.json()) as RuntimeDebateState;
 }
 
 export async function changeCoordinator(
@@ -97,9 +153,7 @@ export async function setWatcherParticipation(
   return (await response.json()) as RayzanDesktopStatus;
 }
 
-export function openRuntimeEventStream(
-  onEvent: () => void,
-): () => void {
+export function openRuntimeEventStream(onEvent: () => void): () => void {
   const source = new EventSource(`${ORIGIN}/api/events/stream`);
   source.onopen = () => {
     onEvent();
@@ -117,4 +171,23 @@ export function openRuntimeEventStream(
 export function debateTitle(topic: string): string {
   const line = topic.split('\n').find((part) => part.trim().length > 0);
   return (line ?? topic).trim();
+}
+
+/** Compose wizard fields into the existing runtime `problem` string. */
+export function composeDecisionProblem(input: {
+  readonly question: string;
+  readonly context: string;
+  readonly goal: string;
+}): string {
+  const question = input.question.trim();
+  const context = input.context.trim();
+  const goal = input.goal.trim();
+  const parts = [question];
+  if (context.length > 0) {
+    parts.push('', `Context:\n${context}`);
+  }
+  if (goal.length > 0) {
+    parts.push('', `Goal: ${goal}`);
+  }
+  return parts.join('\n');
 }

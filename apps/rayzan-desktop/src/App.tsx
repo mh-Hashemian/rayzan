@@ -7,6 +7,10 @@ import {
   setWatcherParticipation,
   type RayzanDesktopStatus,
 } from './api.js';
+import {
+  DebateWorkspace,
+  type ActiveDecisionLaunch,
+} from './components/DebateWorkspace.js';
 import { DebatesView } from './components/DebatesView.js';
 import { DecisionWizard } from './components/decision/DecisionWizard.js';
 import { HomeView } from './components/HomeView.js';
@@ -24,6 +28,8 @@ export function App() {
   const [status, setStatus] = useState<RayzanDesktopStatus | undefined>();
   const [hydration, setHydration] = useState<Hydration>('loading');
   const [statusError, setStatusError] = useState<string | undefined>();
+  const [liveTick, setLiveTick] = useState(0);
+  const [launch, setLaunch] = useState<ActiveDecisionLaunch | undefined>();
 
   const hydrate = useCallback(async (mode: 'initial' | 'live') => {
     const nextInfo = await window.rayzanDesktop?.getInfo();
@@ -60,6 +66,7 @@ export function App() {
     }
     return openRuntimeEventStream(() => {
       void hydrate('live');
+      setLiveTick((tick) => tick + 1);
     });
   }, [hydrate, hydration]);
 
@@ -88,7 +95,11 @@ export function App() {
           <div className="operator-meta">
             <span
               className={
-                hydration === 'ready' ? 'ok' : hydration === 'loading' ? '' : 'warn'
+                hydration === 'ready'
+                  ? 'ok'
+                  : hydration === 'loading'
+                    ? ''
+                    : 'warn'
               }
             >
               {hydration === 'loading'
@@ -161,7 +172,41 @@ export function App() {
                 const next = await setWatcherParticipation(agentId, enabled);
                 setStatus(next);
               }}
+              onDecisionStarted={(nextLaunch) => {
+                setLaunch(nextLaunch);
+                setLiveTick((tick) => tick + 1);
+                setPage('active-decision');
+              }}
             />
+          ) : null}
+          {ready && page === 'active-decision' && launch !== undefined ? (
+            <DebateWorkspace
+              launch={launch}
+              liveTick={liveTick}
+              onBackHome={() => {
+                setPage('home');
+              }}
+              onViewDecision={() => {
+                setPage('debates');
+              }}
+            />
+          ) : null}
+          {ready && page === 'active-decision' && launch === undefined ? (
+            <section className="page">
+              <h1>Active Decision</h1>
+              <p className="lede">
+                Start a decision from New Decision to open this workspace.
+              </p>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => {
+                  setPage('new-decision');
+                }}
+              >
+                New Decision
+              </button>
+            </section>
           ) : null}
           {ready && page === 'debates' ? (
             <DebatesView debates={status?.debateHistory ?? []} />

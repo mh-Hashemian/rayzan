@@ -1,12 +1,13 @@
 export type ProductPage =
   | 'home'
   | 'new-decision'
+  | 'active-decision'
   | 'debates'
   | 'library'
   | 'settings';
 
 export const NAV_ITEMS: readonly {
-  readonly id: ProductPage;
+  readonly id: Exclude<ProductPage, 'active-decision'>;
   readonly label: string;
 }[] = [
   { id: 'home', label: 'Home' },

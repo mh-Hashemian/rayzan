@@ -68,6 +68,8 @@ function icon(page: ProductPage): string {
       return '⌂';
     case 'new-decision':
       return '+';
+    case 'active-decision':
+      return '☰';
     case 'debates':
       return '☰';
     case 'library':

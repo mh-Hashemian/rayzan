@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3C.2 Step 2 — New Decision wizard (Steps 1–4 UI waiting for Operator validation)
+Current phase: Phase 3C.2 Step 5 — Start Decision connected to debate runtime (waiting for Operator validation)
 
 Completed:
 
@@ -25,19 +25,15 @@ Completed:
 - 3C.1 follow-up: isolate Electron better-sqlite3 (ABI 128) from the CLI Node binary (ABI 115)
 - 3C.2 Step 1: product home shell (sidebar, operator bar, AI team, recent debates)
 - 3C.2 Step 1.5: stable connection state, SSE live updates, provider logos, coordinator switching, watcher participation
-- 3C.2 Step 2 (UI): New Decision wizard — define question, select team, review plan (Start Decision not connected yet)
+- 3C.2 Step 2 (UI): New Decision wizard — define question, select team, review plan
+- 3C.2 Step 5: Start Decision → existing `run-live-round` path + Active Decision workspace (SSE stages)
 
 Currently being worked on:
 
-- None (waiting for Operator validation of wizard Steps 1–4 before connecting Start Decision)
+- None (waiting for Operator validation of the end-to-end Start Decision loop)
 
 Next:
 
-- 3C.2 Step 2 Step 5: connect Start Decision to existing runtime
-- 3C.2 Step 3: Debate workspace
+- 3C.2 Step 3: Debate workspace (beyond temporary Active Decision page)
 - 3C.2 Step 4: Observatory inside a debate
 - Operator intervention
-
-Blockers:
-
-- None

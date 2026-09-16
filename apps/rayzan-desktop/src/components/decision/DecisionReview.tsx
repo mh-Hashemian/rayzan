@@ -1,15 +1,43 @@
+import { useState } from 'react';
+
 import type { AgentView } from '../../api.js';
 import type { DecisionDraft } from './types.js';
+
+/** Runtime requires at least two included Watchers for the live path. */
+export const REQUIRED_WATCHERS = 2;
 
 export function DecisionReview(input: {
   readonly draft: DecisionDraft;
   readonly team: readonly AgentView[];
   readonly onBack: () => void;
+  readonly onStart: () => Promise<void>;
 }) {
   const coordinator = input.team.find((agent) => agent.role === 'coordinator');
   const watchers = input.team.filter(
     (agent) => agent.role === 'watcher' && agent.enabled,
   );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const questionOk = input.draft.question.trim().length > 0;
+  const coordinatorOk = coordinator !== undefined;
+  const watchersOk = watchers.length >= REQUIRED_WATCHERS;
+  const canStart = questionOk && coordinatorOk && watchersOk && !busy;
+
+  async function start() {
+    if (!canStart) {
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    try {
+      await input.onStart();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <section className="wizard-panel">
@@ -48,6 +76,11 @@ export function DecisionReview(input: {
             ))}
           </ul>
         )}
+        {!watchersOk ? (
+          <p className="wizard-inline-note">
+            Include at least {REQUIRED_WATCHERS} Watchers to start.
+          </p>
+        ) : null}
       </div>
 
       <div className="review-card">
@@ -68,18 +101,38 @@ export function DecisionReview(input: {
         </ol>
       </div>
 
+      {error !== undefined ? (
+        <div className="error-panel">
+          <p>Rayzan could not start this decision.</p>
+          <p className="review-copy">{error}</p>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              void start();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
       <div className="wizard-actions">
-        <button type="button" className="btn" onClick={input.onBack}>
+        <button type="button" className="btn" onClick={input.onBack} disabled={busy}>
           Back
         </button>
-        <button type="button" className="btn primary" disabled>
-          Start Decision
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!canStart}
+          onClick={() => {
+            void start();
+          }}
+        >
+          {busy ? 'Starting…' : 'Start Decision'}
         </button>
       </div>
-      <p className="wizard-note">
-        Start Decision will connect to the runtime after Operator validation of
-        this wizard.
-      </p>
     </section>
   );
 }
