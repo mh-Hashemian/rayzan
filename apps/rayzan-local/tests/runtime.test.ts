@@ -574,12 +574,111 @@ Prototype the local schema.`,
     assert.equal(eventTypes.includes('SYNTHESIS_CREATED'), true);
     assert.match(done.eventLog.join('\n'), /SYNTHESIS_CREATED/);
   });
+
+  it('bootstraps Round 2 on a second debate after the first completes', () => {
+    const runtime = new RayzanRuntime();
+    const { coordinator, qwen, glm } = registerTrio(runtime);
+
+    function finishDebate(topic: string): void {
+      runtime.runLiveRound1(topic);
+      const started = runtime.snapshot();
+      const coordJob = runtime.nextPendingForAgent(coordinator.id)!;
+      runtime.acknowledgeDelivery(coordinator.id, coordJob.deliveryId);
+      runtime.submitCapturedResponse(
+        coordinator.id,
+        coordJob.deliveryId,
+        JSON.stringify({
+          version: 1,
+          commands: [
+            {
+              type: 'dispatch',
+              messageId: 'round1-brief',
+              debateId: started.debate!.id,
+              roundId: started.round1!.id,
+              recipients: { type: 'round-watchers' },
+              kind: 'brief',
+              body: 'Independent brief.',
+              referencedMessageIds: [],
+            },
+          ],
+        }),
+      );
+      const qwenR1 = runtime.nextPendingForAgent(qwen.id)!;
+      const glmR1 = runtime.nextPendingForAgent(glm.id)!;
+      runtime.acknowledgeDelivery(qwen.id, qwenR1.deliveryId);
+      runtime.acknowledgeDelivery(glm.id, glmR1.deliveryId);
+      runtime.submitCapturedResponse(qwen.id, qwenR1.deliveryId, 'Qwen R1');
+      runtime.submitCapturedResponse(glm.id, glmR1.deliveryId, 'GLM R1');
+      const afterR1 = runtime.snapshot();
+      assert.ok(afterR1.round2, 'Round 2 must bootstrap after Round 1');
+      const planJob = runtime.nextPendingForAgent(coordinator.id)!;
+      runtime.acknowledgeDelivery(coordinator.id, planJob.deliveryId);
+      runtime.submitCapturedResponse(
+        coordinator.id,
+        planJob.deliveryId,
+        JSON.stringify({
+          version: 1,
+          commands: [
+            {
+              type: 'dispatch',
+              messageId: 'r2-qwen',
+              debateId: afterR1.debate!.id,
+              roundId: afterR1.round2!.id,
+              recipients: {
+                type: 'explicit-agents',
+                agentIds: [qwen.id],
+              },
+              kind: 'query',
+              body: 'Challenge Qwen.',
+              referencedMessageIds: [],
+            },
+            {
+              type: 'dispatch',
+              messageId: 'r2-glm',
+              debateId: afterR1.debate!.id,
+              roundId: afterR1.round2!.id,
+              recipients: {
+                type: 'explicit-agents',
+                agentIds: [glm.id],
+              },
+              kind: 'query',
+              body: 'Challenge GLM.',
+              referencedMessageIds: [],
+            },
+          ],
+        }),
+      );
+      const qwenR2 = runtime.nextPendingForAgent(qwen.id)!;
+      const glmR2 = runtime.nextPendingForAgent(glm.id)!;
+      runtime.acknowledgeDelivery(qwen.id, qwenR2.deliveryId);
+      runtime.acknowledgeDelivery(glm.id, glmR2.deliveryId);
+      runtime.submitCapturedResponse(qwen.id, qwenR2.deliveryId, 'Qwen R2');
+      runtime.submitCapturedResponse(glm.id, glmR2.deliveryId, 'GLM R2');
+      const synthJob = runtime.nextPendingForAgent(coordinator.id)!;
+      runtime.acknowledgeDelivery(coordinator.id, synthJob.deliveryId);
+      runtime.submitCapturedResponse(
+        coordinator.id,
+        synthJob.deliveryId,
+        `Problem:\n${topic}\n\nFinal recommendation:\nDone.`,
+      );
+      assert.equal(runtime.snapshot().debate?.status, 'completed');
+      assert.equal(runtime.snapshot().canRetryCoordinatorDispatch, undefined);
+    }
+
+    finishDebate('First debate topic');
+    const firstId = runtime.snapshot().debateHistory.at(-1)?.id;
+    finishDebate('Second debate topic');
+    const second = runtime.snapshot();
+    assert.notEqual(second.debateHistory.at(-1)?.id, firstId);
+    assert.equal(second.debateHistory.length >= 2, true);
+  });
 });
 
 describe('presence', () => {
   it('keeps a failed capture visible after a later waiting heartbeat', () => {
     const runtime = new RayzanRuntime();
     const { coordinator } = registerTrio(runtime);
+    runtime.createRound1('Keep failed capture visible');
     runtime.notePresence({
       agentId: coordinator.id,
       phase: 'error',

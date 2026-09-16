@@ -6,8 +6,8 @@ import {
   queryFirst,
   richComposerText,
   setRichComposerValue,
+  submitFilledComposer,
   visibleText,
-  waitForPaint,
   waitUntil,
 } from './observe.js';
 import type {
@@ -214,13 +214,10 @@ export const chatgptAdapter: BrowserAdapter = {
       );
     }
     setRichComposerValue(field, text);
-    const send = await waitUntil(() => sendButton(), {
-      timeoutMs: 4000,
-      message:
-        'ChatGPT send button did not appear after filling the input (Voice control was still showing).',
+    await submitFilledComposer({
+      field,
+      findSend: () => sendButton(),
     });
-    await waitForPaint();
-    clickControl(send);
     const accepted = () =>
       chatgptSubmitAccepted(field, snapshot) ? true : undefined;
     try {
@@ -229,8 +226,10 @@ export const chatgptAdapter: BrowserAdapter = {
         message: 'ChatGPT send click did not submit.',
       });
     } catch {
-      const retry = sendButton() ?? send;
-      clickControl(retry);
+      const retry = sendButton();
+      if (retry) {
+        clickControl(retry);
+      }
       pressEnter(field);
       await waitUntil(accepted, {
         timeoutMs: 2500,

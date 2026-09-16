@@ -167,7 +167,8 @@ export function DebateWorkspace(input: {
         </div>
       ) : null}
 
-      {view.lastError || view.canRetryCoordinatorDispatch ? (
+      {!view.synthesis &&
+      (view.lastError || view.canRetryCoordinatorDispatch) ? (
         <div className="error-panel">
           <p>Rayzan could not continue this decision.</p>
           {view.lastError ? (

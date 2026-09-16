@@ -7,6 +7,7 @@ import {
   clickControl,
   trackedTurn,
   turnAfterSnapshot,
+  waitForPaint,
 } from '../src/adapters/observe.js';
 import {
   chatgptAdapter,
@@ -269,5 +270,18 @@ describe('browser adapters', () => {
       qwenExtract(turnAfterSnapshot(inplace, 1, 'old', qwenExtract)),
       'grown',
     );
+  });
+
+  it('waitForPaint resolves without requestAnimationFrame (background-tab safe)', async () => {
+    const original = globalThis.requestAnimationFrame;
+    // Simulate a suspended rAF schedule (Chrome background tabs).
+    globalThis.requestAnimationFrame = (() => 0) as typeof requestAnimationFrame;
+    try {
+      const started = Date.now();
+      await waitForPaint(30);
+      assert.ok(Date.now() - started < 500);
+    } finally {
+      globalThis.requestAnimationFrame = original;
+    }
   });
 });

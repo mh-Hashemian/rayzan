@@ -7,9 +7,32 @@ export function AgentProgressCard(input: { readonly agent: AgentProgress }) {
     agent.phasesTotal > 0
       ? Math.round((agent.phasesDone / agent.phasesTotal) * 100)
       : 0;
+  const generating = agent.status === 'Thinking' || agent.status === 'Active';
+  const done =
+    agent.status === 'Responded' || agent.status === 'Completed';
 
   return (
-    <article className="obs-agent-card">
+    <article
+      className={
+        generating
+          ? 'obs-agent-card generating'
+          : done
+            ? 'obs-agent-card done'
+            : 'obs-agent-card'
+      }
+    >
+      <div
+        className={
+          generating
+            ? 'obs-agent-load generating'
+            : done
+              ? 'obs-agent-load done'
+              : 'obs-agent-load idle'
+        }
+        aria-hidden="true"
+      >
+        <span />
+      </div>
       <header className="obs-agent-top">
         <div className="obs-agent-identity">
           <ProviderLogo

@@ -38,6 +38,63 @@ describe('desktop status API', () => {
   });
 });
 
+describe('createRayzanServer default team', () => {
+  it('seeds fixed providers with distinct product names', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'rayzan-default-team-'));
+    const filePath = path.join(dir, 'rayzan.sqlite');
+    try {
+      const app = createRayzanServer({
+        host: '127.0.0.1',
+        port: 0,
+        databasePath: filePath,
+      });
+      await app.listen();
+      const address = app.server.address() as AddressInfo;
+      const status = (await fetch(
+        `http://127.0.0.1:${address.port}/api/status`,
+      ).then((response) => response.json())) as RayzanDesktopStatus;
+      assert.equal(status.agents, 4);
+      assert.deepEqual(
+        status.team.map((agent) => ({
+          id: agent.id,
+          name: agent.name,
+          role: agent.role,
+          provider: agent.provider,
+        })),
+        [
+          {
+            id: 'deepseek',
+            name: 'DeepSeek',
+            role: 'coordinator',
+            provider: 'DeepSeek',
+          },
+          {
+            id: 'chatgpt',
+            name: 'ChatGPT',
+            role: 'watcher',
+            provider: 'OpenAI',
+          },
+          {
+            id: 'qwen',
+            name: 'Qwen',
+            role: 'watcher',
+            provider: 'Alibaba Cloud',
+          },
+          {
+            id: 'glm',
+            name: 'GLM',
+            role: 'watcher',
+            provider: 'Zhipu AI',
+          },
+        ],
+      );
+      await app.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('createRayzanServer bootstrap', () => {
   it('opens an explicit SQLite path, restores after close, and shuts down cleanly', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'rayzan-desktop-boot-'));
@@ -51,23 +108,21 @@ describe('createRayzanServer bootstrap', () => {
       await first.listen();
       const address = first.server.address() as AddressInfo;
       const base = `http://127.0.0.1:${address.port}`;
-      await fetch(`${base}/api/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'DeepSeek Coordinator',
-          role: 'coordinator',
-        }),
-      });
       const before = (await fetch(`${base}/api/status`).then((response) =>
         response.json(),
       )) as RayzanDesktopStatus;
       assert.equal(before.database, 'connected');
       assert.equal(before.databasePath, first.databasePath);
-      assert.equal(before.agents, 1);
-      assert.equal(before.team.length, 1);
-      assert.equal(before.team[0]?.role, 'coordinator');
-      assert.equal(before.team[0]?.connection, 'disconnected');
+      assert.equal(before.agents, 4);
+      assert.equal(before.team.length, 4);
+      assert.equal(
+        before.team.filter((agent) => agent.role === 'coordinator').length,
+        1,
+      );
+      assert.equal(
+        before.team.find((agent) => agent.id === 'chatgpt')?.provider,
+        'OpenAI',
+      );
       const debug = await fetch(`${base}/debug`);
       assert.equal(debug.status, 200);
       await first.close();
@@ -83,7 +138,11 @@ describe('createRayzanServer bootstrap', () => {
         `http://127.0.0.1:${secondAddress.port}/api/status`,
       ).then((response) => response.json())) as RayzanDesktopStatus;
       assert.equal(afterRestart.recovery.status, 'restored');
-      assert.equal(afterRestart.agents, 1);
+      assert.equal(afterRestart.agents, 4);
+      assert.equal(
+        afterRestart.team.find((agent) => agent.id === 'qwen')?.provider,
+        'Alibaba Cloud',
+      );
       assert.ok((afterRestart.recovery.eventsRead ?? 0) >= 1);
       await second.close();
     } finally {

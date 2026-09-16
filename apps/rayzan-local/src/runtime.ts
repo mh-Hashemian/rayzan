@@ -57,6 +57,7 @@ import {
   unwrapCoordinatorJson,
 } from './coordinator-prompt.js';
 import { OPERATOR_ID } from './demo-ids.js';
+import { DEFAULT_TEAM } from './default-team.js';
 import {
   commonRound1Evidence,
   composeRound2WatcherBody,
@@ -269,9 +270,16 @@ export class RayzanRuntime {
   >();
   #eventListeners = new Set<(event: Event) => void>();
   #participation = new Map<string, boolean>();
+  #agentProviders = new Map<string, string>();
 
   constructor(events: EventStore = new InMemoryEventStore()) {
-    this.events = events;
+    // Fan every append (including Orchestrator emits) to SSE listeners so
+    // Observatory sees pending/generating delivery states, not only round completion.
+    this.events = notifyEventAppend(events, (event) => {
+      for (const listener of this.#eventListeners) {
+        listener(event);
+      }
+    });
     this.orchestrator = new Orchestrator(
       this.messages,
       this.exposures,
@@ -316,6 +324,48 @@ export class RayzanRuntime {
     });
     this.#record(`Registered ${agent.name} as ${agent.role} (${agent.id}).`);
     return agent;
+  }
+
+  /**
+   * Ensure the fixed product team exists (DeepSeek / ChatGPT / Qwen / GLM).
+   * Providers are catalog metadata; Operator only toggles Watcher participation.
+   */
+  ensureDefaultTeam(): void {
+    let hasCoordinator = this.agents.listByRole('coordinator').length > 0;
+    for (const member of DEFAULT_TEAM) {
+      const existing = this.agents.getById(asAgentId(member.id));
+      if (existing !== undefined) {
+        this.#agentProviders.set(member.id, member.provider);
+        continue;
+      }
+      let role: AgentRole = member.role;
+      if (role === 'coordinator' && hasCoordinator) {
+        role = 'watcher';
+      }
+      const agent = createAgent({
+        id: member.id,
+        name: member.name,
+        role,
+      });
+      this.agents.register(agent);
+      this.#agentProviders.set(member.id, member.provider);
+      this.#emit('AGENT_REGISTERED', {
+        agentId: agent.id,
+        correlationId: `agent:${agent.id}`,
+        payload: {
+          id: agent.id,
+          name: agent.name,
+          role: agent.role,
+          provider: member.provider,
+        },
+      });
+      this.#record(
+        `Seeded ${agent.name} as ${agent.role} (${agent.id}, provider ${member.provider}).`,
+      );
+      if (role === 'coordinator') {
+        hasCoordinator = true;
+      }
+    }
   }
 
   onEvent(listener: (event: Event) => void): () => void {
@@ -429,6 +479,7 @@ export class RayzanRuntime {
       roundId,
       participantIds: watchers.map((watcher) => watcher.id),
     });
+    this.#resetDebateSessionState();
     this.#freezeRestoredSideEffects = false;
     this.#started = true;
     this.#record(
@@ -798,7 +849,10 @@ export class RayzanRuntime {
           id: agent.id,
           name: agent.name,
           role: agent.role,
-          ...(presence?.provider ? { provider: presence.provider } : {}),
+          ...(() => {
+            const provider = this.#providerFor(agent.id);
+            return provider !== undefined ? { provider } : {};
+          })(),
           connected:
             presence !== undefined && now - presence.lastSeen < CONNECTED_MS,
           phase: presence?.phase ?? 'idle',
@@ -848,9 +902,15 @@ export class RayzanRuntime {
       ...(coordinatorPlan ? { coordinatorPlan } : {}),
       round2Messages: this.#round2Messages(),
       ...(synthesis ? { synthesis } : {}),
-      ...(this.#lastCommands ? { lastCommands: this.#lastCommands } : {}),
-      ...(this.#lastError ? { lastError: this.#lastError } : {}),
-      ...(!this.#round1Dispatched && this.#coordinatorCommandText() !== undefined
+      ...(this.#lastCommands && this.#activeDebate() !== undefined
+        ? { lastCommands: this.#lastCommands }
+        : {}),
+      ...(this.#lastError && this.#activeDebate() !== undefined
+        ? { lastError: this.#lastError }
+        : {}),
+      ...(this.#activeDebate() !== undefined &&
+      !this.#round1Dispatched &&
+      this.#coordinatorCommandText() !== undefined
         ? { canRetryCoordinatorDispatch: true }
         : {}),
       log: [...this.#log],
@@ -872,7 +932,9 @@ export class RayzanRuntime {
 
   #advanceAfterWatcherResponse(): void {
     this.#maybeCompleteRound1();
+    this.#ensureRound2Bootstrapped();
     this.#maybeCompleteRound2AndSynthesize();
+    this.#ensureSynthesisQueued();
   }
 
   #maybeCompleteRound1(): void {
@@ -894,10 +956,23 @@ export class RayzanRuntime {
         payload: { number: 1, status: 'completed' },
       });
       this.#record('Round 1 auto-completed after all Watcher responses.');
-      this.#bootstrapRound2AndNotifyCoordinator();
     } catch {
       // Collection not ready.
     }
+  }
+
+  /** Start Round 2 when Round 1 is done and Round 2 was never created. */
+  #ensureRound2Bootstrapped(): void {
+    const round1 = this.#roundByNumber(1);
+    if (round1 === undefined || round1.status !== 'completed') {
+      return;
+    }
+    if (this.#roundByNumber(2) !== undefined) {
+      this.#round2Bootstrapped = true;
+      return;
+    }
+    this.#round2Bootstrapped = false;
+    this.#bootstrapRound2AndNotifyCoordinator();
   }
 
   #maybeCompleteRound2AndSynthesize(): void {
@@ -924,8 +999,30 @@ export class RayzanRuntime {
       });
       this.#record('Round 2 auto-completed after all Watcher responses.');
       this.#queueCoordinatorSynthesis();
-    } catch {
-      // Collection not ready.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#lastError = message;
+      this.#record(`Round 2 completion failed: ${message}`);
+    }
+  }
+
+  /** Queue synthesis when Round 2 is done but the Coordinator was never prompted. */
+  #ensureSynthesisQueued(): void {
+    const round2 = this.#roundByNumber(2);
+    if (round2 === undefined || round2.status !== 'completed') {
+      return;
+    }
+    if (this.#synthesisAlreadyQueuedOrStored()) {
+      this.#synthesisQueued = true;
+      return;
+    }
+    this.#synthesisQueued = false;
+    try {
+      this.#queueCoordinatorSynthesis();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#lastError = message;
+      this.#record(`Synthesis queue failed: ${message}`);
     }
   }
 
@@ -933,14 +1030,14 @@ export class RayzanRuntime {
     if (this.#round2Bootstrapped) {
       return;
     }
-    const failed = this.agents
-      .listByRole('watcher')
-      .find((watcher) => this.#round1Status(watcher) === 'failed');
+    const watchers = this.#debateWatchers();
+    const failed = watchers.find(
+      (watcher) => this.#round1Status(watcher) === 'failed',
+    );
     if (failed) {
       this.#lastError = `${failed.name}: Capture failed; Coordinator was not contacted.`;
       return;
     }
-    const watchers = this.agents.listByRole('watcher');
     const debate = this.#debate();
     const round2Id = this.#nextId('round');
     this.rounds.create(
@@ -1055,7 +1152,7 @@ export class RayzanRuntime {
     this.#parsedChallenges = undefined;
     try {
       const batch = parseCoordinatorCommandBatch(unwrapCoordinatorJson(text));
-      const watchers = this.agents.listByRole('watcher');
+      const watchers = this.#debateWatchers();
       const challenges = watcherChallengesFromBatch({ batch, watchers });
       this.#parsedChallenges = challenges;
       this.#lastError = undefined;
@@ -1173,7 +1270,8 @@ export class RayzanRuntime {
   }
 
   #queueCoordinatorSynthesis(): void {
-    if (this.#synthesisQueued) {
+    if (this.#synthesisAlreadyQueuedOrStored()) {
+      this.#synthesisQueued = true;
       return;
     }
     const debate = this.#debate();
@@ -1212,6 +1310,27 @@ export class RayzanRuntime {
     this.orchestrator.dispatch(intent);
     this.#synthesisQueued = true;
     this.#record('Synthesis evidence packet queued for Coordinator.');
+  }
+
+  #synthesisAlreadyQueuedOrStored(): boolean {
+    const debate = this.#activeDebate() ?? this.#focusDebate();
+    if (debate === undefined) {
+      return false;
+    }
+    if (this.syntheses.getByDebateId(debate.id) !== undefined) {
+      return true;
+    }
+    const coordinator = this.agents.listByRole('coordinator')[0];
+    if (coordinator === undefined) {
+      return false;
+    }
+    return this.messages.listByDebate(debate.id).some(
+      (message) =>
+        message.kind === 'input' &&
+        message.senderId === OPERATOR_ID &&
+        message.recipientIds.includes(coordinator.id) &&
+        message.id.startsWith('msg-coordinator-synthesis'),
+    );
   }
 
   #storeCoordinatorSynthesis(text: string): void {
@@ -1357,17 +1476,23 @@ export class RayzanRuntime {
 
   #timeline(): readonly string[] {
     const lines: string[] = [];
-    const watchers = this.agents.listByRole('watcher');
+    const watchers = this.#debateWatchers();
+    const debate = this.#focusDebate();
     const round1 = this.#roundByNumber(1);
     const coordinator = this.agents.listByRole('coordinator')[0];
     const coordinatorCapture = coordinator
       ? this.#presence.get(coordinator.id)?.capture
       : undefined;
-    const coordinatorDeliveries = coordinator
-      ? this.transport
-          .listAll()
-          .filter((delivery) => delivery.recipientId === coordinator.id)
-      : [];
+    const coordinatorDeliveries =
+      coordinator === undefined || debate === undefined
+        ? []
+        : this.transport
+            .listAll()
+            .filter(
+              (delivery) =>
+                delivery.recipientId === coordinator.id &&
+                delivery.debateId === debate.id,
+            );
     const coordinatorR1 = coordinatorDeliveries[0];
     const coordinatorR2 = coordinatorDeliveries[1];
 
@@ -1652,6 +1777,25 @@ export class RayzanRuntime {
       .filter((watcher) => this.#watcherEnabled(watcher));
   }
 
+  /** Watchers that joined Round 1 (or enabled team if Round 1 has no roster yet). */
+  #debateWatchers(): readonly Agent[] {
+    const round1 = this.#roundByNumber(1);
+    if (round1 !== undefined) {
+      try {
+        const ids = this.workflow.getParticipantIds(round1.id);
+        if (ids.length > 0) {
+          return ids.flatMap((id) => {
+            const agent = this.agents.getById(id);
+            return agent !== undefined && agent.role === 'watcher' ? [agent] : [];
+          });
+        }
+      } catch {
+        // Fall through to enabled Watchers.
+      }
+    }
+    return this.#watchersForNewDebate();
+  }
+
   #requireSingleCoordinator(): Agent {
     const coordinators = this.agents.listByRole('coordinator');
     if (coordinators.length !== 1) {
@@ -1782,8 +1926,8 @@ export class RayzanRuntime {
       agentId: agent.id,
       name: agent.name,
       role: agent.role,
-      ...(binding?.provider || presence?.provider
-        ? { provider: binding?.provider ?? presence?.provider }
+      ...(this.#providerFor(agent.id)
+        ? { provider: this.#providerFor(agent.id) }
         : {}),
       state,
       ...(last ? { lastDelivery: { id: last.id, status: last.status } } : {}),
@@ -1791,6 +1935,22 @@ export class RayzanRuntime {
         ? { error: binding?.error ?? presence?.error }
         : {}),
     };
+  }
+
+  #providerFor(agentId: string): string | undefined {
+    const catalog = this.#agentProviders.get(agentId);
+    if (catalog !== undefined) {
+      return catalog;
+    }
+    const binding = this.#bindings.get(agentId);
+    if (binding?.provider !== undefined) {
+      return binding.provider;
+    }
+    const presence = this.#presence.get(asAgentId(agentId));
+    if (presence?.provider !== undefined) {
+      return presence.provider;
+    }
+    return undefined;
   }
 
   #agentId(name: string): string {
@@ -1825,11 +1985,8 @@ export class RayzanRuntime {
       payload?: unknown;
     },
   ): Event {
-    const event = recordEvent(this.events, { type, ...input });
-    for (const listener of this.#eventListeners) {
-      listener(event);
-    }
-    return event;
+    // Listeners are notified by the EventStore append wrapper.
+    return recordEvent(this.events, { type, ...input });
   }
 
   #lastEventId(type: EventType): string | undefined {
@@ -1902,6 +2059,9 @@ export class RayzanRuntime {
         }),
       );
     }
+    // Resume Round 2 / synthesis if a prior debate stalled mid-flow.
+    this.#ensureRound2Bootstrapped();
+    this.#ensureSynthesisQueued();
     return result;
   }
 
@@ -1922,12 +2082,25 @@ export class RayzanRuntime {
   #syncLogicalFlags(): void {
     const debate = this.#activeDebate();
     this.#started = debate !== undefined;
-    const round1 = this.#roundByNumber(1);
-    const round2 = this.#roundByNumber(2);
+    if (debate === undefined) {
+      this.#coordinatorBriefSent = false;
+      this.#round1Dispatched = false;
+      this.#round2Bootstrapped = false;
+      this.#round2Dispatched = false;
+      this.#synthesisQueued = false;
+      this.#lastCommands = undefined;
+      this.#lastError = undefined;
+      this.#coordinatorRaw = undefined;
+      this.#coordinatorParseError = undefined;
+      this.#parsedChallenges = undefined;
+      return;
+    }
+    const rounds = this.rounds.listByDebate(debate.id);
+    const round1 = rounds.find((round) => round.number === 1);
+    const round2 = rounds.find((round) => round.number === 2);
     this.#round2Bootstrapped = round2 !== undefined;
     const coordinator = this.agents.listByRole('coordinator')[0];
-    const messages =
-      debate === undefined ? [] : this.messages.listByDebate(debate.id);
+    const messages = this.messages.listByDebate(debate.id);
     this.#coordinatorBriefSent = messages.some(
       (message) =>
         message.senderId === OPERATOR_ID &&
@@ -1948,16 +2121,20 @@ export class RayzanRuntime {
         (message) =>
           message.roundId === round2.id && message.kind === 'query',
       );
-    this.#synthesisQueued =
-      (debate !== undefined &&
-        this.syntheses.getByDebateId(debate.id) !== undefined) ||
-      messages.some(
-        (message) =>
-          coordinator !== undefined &&
-          message.recipientIds.includes(coordinator.id) &&
-          message.kind === 'input' &&
-          this.#round2Dispatched,
-      );
+    this.#synthesisQueued = this.#synthesisAlreadyQueuedOrStored();
+  }
+
+  #resetDebateSessionState(): void {
+    this.#coordinatorBriefSent = false;
+    this.#round1Dispatched = false;
+    this.#round2Bootstrapped = false;
+    this.#round2Dispatched = false;
+    this.#synthesisQueued = false;
+    this.#lastError = undefined;
+    this.#lastCommands = undefined;
+    this.#coordinatorRaw = undefined;
+    this.#coordinatorParseError = undefined;
+    this.#parsedChallenges = undefined;
   }
 
   #bumpSeqFromRestoredIds(): void {
@@ -2260,4 +2437,25 @@ function stringList(value: unknown): string[] {
     return [];
   }
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function notifyEventAppend(
+  store: EventStore,
+  onAppend: (event: Event) => void,
+): EventStore {
+  return {
+    append(event) {
+      store.append(event);
+      onAppend(event);
+    },
+    getById(id) {
+      return store.getById(id);
+    },
+    listByDebate(debateId) {
+      return store.listByDebate(debateId);
+    },
+    listAll() {
+      return store.listAll();
+    },
+  };
 }

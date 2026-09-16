@@ -5,9 +5,9 @@ import {
   queryAll,
   queryFirst,
   setComposerValue,
+  submitFilledComposer,
   syncReactComposer,
   visibleText,
-  waitForPaint,
   waitUntil,
 } from './observe.js';
 import type {
@@ -151,13 +151,10 @@ export const qwenAdapter: BrowserAdapter = {
     }
     setComposerValue(field, text);
     syncReactComposer(field);
-    const send = await waitUntil(() => sendButtonReady(), {
-      timeoutMs: 4000,
-      message:
-        'Qwen send button did not appear after filling the input (Voice control was still showing).',
+    await submitFilledComposer({
+      field,
+      findSend: () => sendButtonReady(),
     });
-    await waitForPaint();
-    clickControl(send);
     const accepted = () =>
       qwenSubmitAccepted(field, snapshot) ? true : undefined;
     try {
@@ -166,8 +163,10 @@ export const qwenAdapter: BrowserAdapter = {
         message: 'Qwen send click did not submit.',
       });
     } catch {
-      const retry = sendButtonReady() ?? send;
-      clickControl(retry);
+      const retry = sendButtonReady();
+      if (retry) {
+        clickControl(retry);
+      }
       pressEnter(field);
       await waitUntil(accepted, {
         timeoutMs: 2500,

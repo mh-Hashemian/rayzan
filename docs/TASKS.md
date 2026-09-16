@@ -62,8 +62,7 @@
 - [x] Product home refinement (3C.2 Step 1.5 — SSE, logos, coordinator switch)
 - [x] New Decision wizard (3C.2 Step 2 — UI Steps 1–4 + Start Decision → runtime)
 - [x] Debate workspace / Observatory UI (3C.3 — layout + live progress/agents/synthesis)
-- [ ] Operator intervention
-
+- [x] 3C.3 Acceptance Stabilization (reliable complete debate loop; awaiting Operator validation)
 - [ ] Operator intervention
 
 ## Later

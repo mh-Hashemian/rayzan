@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3C.3 — Debate Workspace / Observatory UI (live-connected)
+Current phase: Phase 3C.3 — Debate Workspace acceptance stabilization (awaiting Operator validation)
 
 Completed:
 
@@ -29,6 +29,7 @@ Completed:
 - 3C.2 Step 5: Start Decision → existing `run-live-round` path + Active Decision workspace (SSE stages)
 - 3C.3 Checkpoint 1: Debate Workspace observatory layout (static mock)
 - 3C.3 Checkpoints 2–4: progress, agent cards, synthesis wired to `/api/state` + SSE
+- 3C.3 Acceptance Stabilization: reliable multi-debate loop (SSE delivery events, session flag reset, Round 2 roster, Observatory loading exclusivity, background-tab send, false retry banner)
 
 Currently being worked on:
 
@@ -36,4 +37,4 @@ Currently being worked on:
 
 Next:
 
-- Observatory refinements / Operator intervention
+- Observatory refinements / Operator intervention (only after Operator accepts 3C.3)

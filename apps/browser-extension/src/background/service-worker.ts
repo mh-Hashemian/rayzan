@@ -8,6 +8,32 @@ interface Binding {
 
 type BindingMap = Record<string, Binding>;
 
+const WAKE_ALARM = 'rayzan-wake-bound-tabs';
+
+async function wakeBoundTabs(): Promise<void> {
+  const stored = await chrome.storage.local.get('bindings');
+  const bindings = (stored.bindings ?? {}) as BindingMap;
+  const tabIds = Object.keys(bindings)
+    .map((key) => Number(key))
+    .filter((id) => Number.isInteger(id));
+  await Promise.all(
+    tabIds.map(async (tabId) => {
+      try {
+        await chrome.tabs.sendMessage(tabId, { type: 'wake-poll' });
+      } catch {
+        // Tab may not have a content script yet.
+      }
+    }),
+  );
+}
+
+void chrome.alarms.create(WAKE_ALARM, { periodInMinutes: 0.05 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === WAKE_ALARM) {
+    void wakeBoundTabs();
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void (async () => {
     try {

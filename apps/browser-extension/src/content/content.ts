@@ -532,6 +532,17 @@ async function poll(): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'wake-poll') {
+    void poll().finally(() => {
+      try {
+        sendResponse({ ok: true });
+      } catch {
+        // Channel may already be closed.
+      }
+    });
+    return true;
+  }
+
   if (message?.type === 'diagnostics') {
     void (async () => {
       try {
@@ -582,3 +593,11 @@ void poll();
 setInterval(() => {
   void poll();
 }, 1500);
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      void poll();
+    }
+  });
+}

@@ -1,3 +1,4 @@
+export { DEFAULT_TEAM, type DefaultTeamMember } from './default-team.js';
 export { LOCAL_BRIDGE_PORT, OPERATOR_ID } from './demo-ids.js';
 export {
   defaultEventDatabasePath,

@@ -16,8 +16,13 @@ export function DebateProgress(input: {
             {index > 0 ? (
               <span className="obs-stage-line" aria-hidden="true" />
             ) : null}
-            <span className="obs-stage-mark" aria-hidden="true">
-              {mark(stage.status, index + 1)}
+            <span className="obs-stage-mark-wrap" aria-hidden="true">
+              {stage.status === 'active' ? (
+                <span className="obs-stage-spinner" />
+              ) : null}
+              <span className="obs-stage-mark">
+                {mark(stage.status, index + 1)}
+              </span>
             </span>
             <div className="obs-stage-copy">
               <strong>{stage.label}</strong>

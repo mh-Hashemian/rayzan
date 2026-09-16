@@ -56,6 +56,7 @@ export function createRayzanServer(
   const databasePath =
     events instanceof SqliteEventStore ? events.path : options.databasePath;
   const runtime = new RayzanRuntime(events);
+  runtime.ensureDefaultTeam();
   const context: BridgeContext = {
     ...(databasePath !== undefined ? { databasePath } : {}),
   };

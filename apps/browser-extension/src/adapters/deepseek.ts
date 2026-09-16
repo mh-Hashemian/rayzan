@@ -4,8 +4,8 @@ import {
   queryAll,
   queryFirst,
   setComposerValue,
+  submitFilledComposer,
   visibleText,
-  waitForPaint,
   waitUntil,
 } from './observe.js';
 import type {
@@ -133,12 +133,13 @@ export const deepSeekAdapter: BrowserAdapter = {
       );
     }
     setComposerValue(field, text);
-    const send = await waitUntil(() => sendButtonReady(), {
-      timeoutMs: 4000,
-      message: 'DeepSeek send button stayed disabled after filling the input.',
+    await submitFilledComposer({
+      field,
+      findSend: () => sendButtonReady(),
+      clickSend: (send) => {
+        send.click();
+      },
     });
-    await waitForPaint();
-    send.click();
     const accepted = () =>
       deepSeekSubmitAccepted(field, snapshot) ? true : undefined;
     try {
@@ -147,7 +148,10 @@ export const deepSeekAdapter: BrowserAdapter = {
         message: 'DeepSeek send click did not submit.',
       });
     } catch {
-      clickControl(sendButtonReady() ?? send);
+      const retry = sendButtonReady();
+      if (retry) {
+        clickControl(retry);
+      }
       pressEnter(field);
       await waitUntil(accepted, {
         timeoutMs: 2500,

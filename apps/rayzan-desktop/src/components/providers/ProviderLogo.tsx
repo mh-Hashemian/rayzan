@@ -11,14 +11,14 @@ export function providerKey(name: string, provider?: string): string {
   if (raw.includes('deepseek')) {
     return 'deepseek';
   }
-  if (raw.includes('qwen')) {
-    return 'qwen';
-  }
-  if (raw.includes('glm')) {
-    return 'glm';
-  }
   if (raw.includes('chatgpt') || raw.includes('openai')) {
     return 'chatgpt';
+  }
+  if (raw.includes('alibaba') || raw.includes('qwen')) {
+    return 'qwen';
+  }
+  if (raw.includes('zhipu') || raw.includes('glm')) {
+    return 'glm';
   }
   return 'fallback';
 }

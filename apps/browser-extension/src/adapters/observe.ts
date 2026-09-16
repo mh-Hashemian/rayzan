@@ -317,6 +317,50 @@ export function clickControl(element: HTMLElement): void {
   }
 }
 
+export function isDocumentHidden(): boolean {
+  return (
+    typeof document !== 'undefined' &&
+    (document.visibilityState === 'hidden' || document.hidden === true)
+  );
+}
+
+/**
+ * Submit after filling the composer. In background tabs ChatGPT/DeepSeek/Qwen
+ * often leave Send disabled until the tab paints — waiting for that button
+ * hangs until the user focuses the tab. Prefer an immediate Enter when hidden.
+ */
+export async function submitFilledComposer(input: {
+  readonly field: HTMLElement;
+  readonly findSend: () => HTMLElement | undefined;
+  readonly clickSend?: (send: HTMLElement) => void;
+  readonly foregroundTimeoutMs?: number;
+}): Promise<void> {
+  const click =
+    input.clickSend ??
+    ((send: HTMLElement) => {
+      clickControl(send);
+    });
+  const hidden = isDocumentHidden();
+  let send = input.findSend();
+  if (send === undefined && !hidden) {
+    try {
+      send = await waitUntil(() => input.findSend(), {
+        timeoutMs: input.foregroundTimeoutMs ?? 4000,
+        message: 'Send control did not become ready after filling the input.',
+      });
+    } catch {
+      send = input.findSend();
+    }
+  }
+  await waitForPaint(hidden ? 0 : 50);
+  send = send ?? input.findSend();
+  if (send !== undefined) {
+    click(send);
+  } else {
+    pressEnter(input.field);
+  }
+}
+
 export function pressEnter(element: HTMLElement): void {
   const onKeyDown = reactPropsOf(element)?.onKeyDown;
   if (typeof onKeyDown === 'function') {
@@ -340,15 +384,35 @@ export function pressEnter(element: HTMLElement): void {
   }
 }
 
-export async function waitForPaint(): Promise<void> {
-  const raf = globalThis.requestAnimationFrame;
-  if (typeof raf === 'function') {
-    await new Promise<void>((resolve) => {
-      raf(() => raf(() => resolve()));
-    });
+/**
+ * Yield briefly so React/layout can enable the send control after composer
+ * input. Must not rely solely on requestAnimationFrame: Chrome suspends rAF
+ * in background tabs, which previously blocked sendPrompt until the tab was
+ * focused (and left sendInFlight stuck in the content script).
+ */
+export async function waitForPaint(timeoutMs = 50): Promise<void> {
+  const hidden =
+    typeof document !== 'undefined' &&
+    (document.visibilityState === 'hidden' || document.hidden);
+  // Do not await timers in background tabs — Chrome may delay them until focus,
+  // which made sendPrompt appear to "only work when the tab is focused".
+  if (hidden || timeoutMs <= 0) {
     return;
   }
-  await new Promise((resolve) => setTimeout(resolve, 16));
+  const fallback = new Promise<void>((resolve) => {
+    setTimeout(resolve, timeoutMs);
+  });
+  const raf = globalThis.requestAnimationFrame;
+  if (typeof raf !== 'function') {
+    await fallback;
+    return;
+  }
+  await Promise.race([
+    new Promise<void>((resolve) => {
+      raf(() => raf(() => resolve()));
+    }),
+    fallback,
+  ]);
 }
 
 export async function waitUntil<T>(
@@ -368,6 +432,10 @@ export async function waitUntil<T>(
       settled = true;
       observer.disconnect();
       clearInterval(timer);
+      clearTimeout(deadline);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisible);
+      }
       if (error) {
         reject(error);
       } else {
@@ -384,9 +452,16 @@ export async function waitUntil<T>(
         finish(new Error(options.message));
       }
     };
+    const onVisible = () => {
+      tick();
+    };
     const observer = new MutationObserver(tick);
     observeRoots(observer);
     const timer = setInterval(tick, 120);
+    const deadline = setTimeout(tick, options.timeoutMs);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisible);
+    }
     tick();
   });
 }

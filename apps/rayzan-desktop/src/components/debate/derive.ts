@@ -114,27 +114,34 @@ function deriveStages(input: {
   readonly round2Done: boolean;
   readonly hasSynthesis: boolean;
 }): ProgressStage[] {
-  const reframe: StageStatus = input.framingDone || input.round1Done
-    ? 'completed'
-    : input.sessionStarted
-      ? 'active'
-      : 'waiting';
-  const round1: StageStatus = input.round1Done
-    ? 'completed'
-    : input.framingDone
-      ? 'active'
-      : 'waiting';
-  const challenge: StageStatus = input.round2Done
-    ? 'completed'
-    : input.round2Exists || input.round1Done
-      ? 'active'
-      : 'waiting';
-  const synthesis: StageStatus = input.hasSynthesis
-    ? 'completed'
-    : input.round2Done
-      ? 'active'
-      : 'waiting';
-  const decision: StageStatus = input.hasSynthesis ? 'completed' : 'waiting';
+  // Exactly one stage is active at a time (earliest incomplete work).
+  let reframe: StageStatus = 'waiting';
+  let round1: StageStatus = 'waiting';
+  let challenge: StageStatus = 'waiting';
+  let synthesis: StageStatus = 'waiting';
+  let decision: StageStatus = 'waiting';
+
+  if (input.hasSynthesis) {
+    reframe = 'completed';
+    round1 = 'completed';
+    challenge = 'completed';
+    synthesis = 'completed';
+    decision = 'completed';
+  } else if (input.round2Done) {
+    reframe = 'completed';
+    round1 = 'completed';
+    challenge = 'completed';
+    synthesis = 'active';
+  } else if (input.round2Exists || input.round1Done) {
+    reframe = 'completed';
+    round1 = 'completed';
+    challenge = 'active';
+  } else if (input.framingDone) {
+    reframe = 'completed';
+    round1 = 'active';
+  } else if (input.sessionStarted) {
+    reframe = 'active';
+  }
 
   return [
     {
@@ -198,18 +205,38 @@ function deriveDetails(input: {
   readonly watcherCount: number;
   readonly hasSynthesis: boolean;
 }): ProgressDetail[] {
+  const framing: StageStatus =
+    input.framingDone || input.round1Done
+      ? 'completed'
+      : 'active';
+  const round1: StageStatus = input.round1Done
+    ? 'completed'
+    : input.framingDone
+      ? 'active'
+      : 'waiting';
+  const round2: StageStatus = input.round2Done
+    ? 'completed'
+    : input.round2Exists || input.round1Done
+      ? 'active'
+      : 'waiting';
+  const watcherResponses: StageStatus =
+    input.round2Done ||
+    (input.round2Exists &&
+      input.round2Responded >= input.watcherCount &&
+      input.watcherCount > 0)
+      ? 'completed'
+      : input.round2Exists
+        ? 'active'
+        : 'waiting';
+
   return [
     {
       label: 'Coordinator framing',
-      status: input.framingDone || input.round1Done ? 'completed' : 'active',
+      status: framing,
     },
     {
       label: 'Round 1 analysis',
-      status: input.round1Done
-        ? 'completed'
-        : input.framingDone
-          ? 'active'
-          : 'waiting',
+      status: round1,
       note:
         input.watcherCount > 0
           ? `${input.round1Responded} of ${input.watcherCount} received`
@@ -217,23 +244,11 @@ function deriveDetails(input: {
     },
     {
       label: 'Round 2 challenge',
-      status: input.round2Done
-        ? 'completed'
-        : input.round2Exists || input.round1Done
-          ? 'active'
-          : 'waiting',
+      status: round2,
     },
     {
       label: 'Watcher responses',
-      status:
-        input.round2Done ||
-        (input.round2Exists &&
-          input.round2Responded >= input.watcherCount &&
-          input.watcherCount > 0)
-          ? 'completed'
-          : input.round2Exists
-            ? 'active'
-            : 'waiting',
+      status: watcherResponses,
       note:
         input.round2Exists && input.watcherCount > 0
           ? `${input.round2Responded} of ${input.watcherCount} received`
@@ -275,7 +290,7 @@ function deriveAgents(
   state: RuntimeDebateState,
   coordinatorId: string | undefined,
 ): AgentProgress[] {
-  return state.agents
+  const agents = state.agents
     .filter((agent) => agent.role === 'coordinator' || agent.enabled)
     .filter((agent) => agent.role !== 'operator')
     .map((agent) => {
@@ -284,6 +299,10 @@ function deriveAgents(
       }
       return deriveWatcher(agent, state, coordinatorId);
     });
+  return [
+    ...agents.filter((agent) => agent.role === 'coordinator'),
+    ...agents.filter((agent) => agent.role !== 'coordinator'),
+  ];
 }
 
 function deriveCoordinator(
@@ -296,6 +315,9 @@ function deriveCoordinator(
   const framingDone = state.agents.some(
     (item) => item.role === 'watcher' && item.enabled && item.round1Status !== 'idle',
   );
+  const coordinatorWorking =
+    agent.phase === 'sending' || agent.phase === 'generating';
+
   let phasesDone = 0;
   if (state.sessionStarted || state.activeDebate || state.debate) {
     phasesDone = 1;
@@ -318,19 +340,31 @@ function deriveCoordinator(
   if (hasSynthesis) {
     status = 'Completed';
     summary = 'Final synthesis stored';
+  } else if (coordinatorWorking) {
+    // Only show loading when the Coordinator itself is generating.
+    status = 'Thinking';
+    if (round2Done) {
+      summary = 'Preparing final synthesis';
+    } else if (round1Done && !state.round2) {
+      summary = 'Reviewing Round 1 evidence';
+    } else if (!framingDone) {
+      summary = 'Framing the Operator question';
+    } else {
+      summary = 'Working';
+    }
   } else if (round2Done) {
     status = 'Thinking';
     summary = 'Preparing final synthesis';
   } else if (state.round2) {
-    status = 'Active';
-    summary = 'Round 2 challenges sent / Reviewing responses';
+    status = 'Waiting';
+    summary = 'Waiting for Round 2 Watcher responses';
   } else if (round1Done) {
     status = 'Thinking';
     summary = 'Reviewing Round 1 evidence';
   } else if (framingDone) {
-    status = 'Active';
-    summary = 'Round 1 brief dispatched to Watchers';
-  } else if (state.sessionStarted) {
+    status = 'Waiting';
+    summary = 'Waiting for Round 1 Watcher responses';
+  } else if (state.sessionStarted || state.activeDebate || state.debate) {
     status = 'Thinking';
     summary = 'Framing the Operator question';
   }
@@ -377,7 +411,10 @@ function deriveWatcher(
   } else if (agent.round2Status === 'responded') {
     status = 'Responded';
     summary = 'Round 2 response received';
-  } else if (agent.round2Status === 'generating' || agent.round2Status === 'pending') {
+  } else if (
+    isWorkingStatus(agent.round2Status) ||
+    isBusyPhase(agent.phase ?? 'idle', agent.round2Status)
+  ) {
     status = 'Thinking';
     summary = 'Working on Round 2 challenge';
   } else if (agent.round1Status === 'responded') {
@@ -385,7 +422,10 @@ function deriveWatcher(
     summary = state.round2
       ? 'Waiting for Round 2 challenge'
       : 'Round 1 complete · Awaiting challenges';
-  } else if (agent.round1Status === 'generating' || agent.round1Status === 'pending') {
+  } else if (
+    isWorkingStatus(agent.round1Status) ||
+    isBusyPhase(agent.phase ?? 'idle', agent.round1Status)
+  ) {
     status = 'Thinking';
     summary = 'Working on Round 1 analysis';
   }
@@ -402,6 +442,22 @@ function deriveWatcher(
     round1: round1Label,
     round2: round2Label,
   };
+}
+
+function isWorkingStatus(status: string): boolean {
+  return (
+    status === 'generating' ||
+    status === 'pending' ||
+    status === 'sending' ||
+    status === 'delivered'
+  );
+}
+
+function isBusyPhase(phase: string, roundStatus: string): boolean {
+  if (roundStatus === 'responded' || roundStatus === 'failed' || roundStatus === 'idle') {
+    return false;
+  }
+  return phase === 'sending' || phase === 'generating' || phase === 'waiting';
 }
 
 function roundLabel(status: string): string {

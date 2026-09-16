@@ -957,6 +957,24 @@ h2 {
   background: color-mix(in srgb, var(--ok) 55%, var(--line));
 }
 
+.obs-stage-mark-wrap {
+  position: relative;
+  width: 2.35rem;
+  height: 2.35rem;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+}
+
+.obs-stage-spinner {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--primary) 22%, transparent);
+  border-top-color: var(--primary);
+  animation: obs-spin 0.85s linear infinite;
+}
+
 .obs-stage-mark {
   width: 1.8rem;
   height: 1.8rem;
@@ -980,6 +998,21 @@ h2 {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+}
+
+@keyframes obs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes obs-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
 }
 
 .obs-stage-copy {
@@ -1044,6 +1077,7 @@ h2 {
 }
 
 .obs-agent-card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1052,6 +1086,59 @@ h2 {
   display: flex;
   flex-direction: column;
   min-height: 11.5rem;
+  overflow: hidden;
+}
+
+.obs-agent-card.generating {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--line));
+}
+
+.obs-agent-card.done {
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+}
+
+.obs-agent-load {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  overflow: hidden;
+  background: transparent;
+}
+
+.obs-agent-load.idle span {
+  display: none;
+}
+
+.obs-agent-load.generating {
+  background: color-mix(in srgb, var(--primary) 12%, #edf1f5);
+}
+
+.obs-agent-load.generating span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--primary),
+    var(--accent),
+    transparent
+  );
+  animation: obs-indeterminate 1.1s ease-in-out infinite;
+}
+
+.obs-agent-load.done {
+  background: color-mix(in srgb, var(--ok) 18%, #edf1f5);
+}
+
+.obs-agent-load.done span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--ok);
 }
 
 .obs-agent-top {
