@@ -585,11 +585,28 @@ export class RayzanRuntime {
   }): void {
     const agent = this.#requireAgent(input.agentId);
     const previous = this.#bindings.get(agent.id);
+    if (!input.available) {
+      this.#bindings.delete(agent.id);
+      this.#presence.delete(agent.id);
+      if (previous !== undefined) {
+        this.#emit('BINDING_CHANGED', {
+          agentId: agent.id,
+          correlationId: `agent:${agent.id}`,
+          payload: {
+            agentId: agent.id,
+            available: false,
+            state: 'not-bound',
+          },
+        });
+      }
+      this.#record(`Browser binding cleared for ${agent.name}.`);
+      return;
+    }
     const next = {
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.tabId ? { tabId: input.tabId } : {}),
       lastSeen: Date.now(),
-      available: input.available,
+      available: true,
       ...(input.error ? { error: input.error } : {}),
     };
     this.#bindings.set(agent.id, next);
@@ -611,9 +628,7 @@ export class RayzanRuntime {
       });
     }
     this.#record(
-      input.available
-        ? `Browser binding set for ${agent.name}${input.provider ? ` (${input.provider})` : ''}.`
-        : `Browser binding unavailable for ${agent.name}.`,
+      `Browser binding set for ${agent.name}${input.provider ? ` (${input.provider})` : ''}.`,
     );
   }
 

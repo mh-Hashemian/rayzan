@@ -17,21 +17,20 @@
   --error: #c23b3b;
   --position-change: #2a6f8f;
   --shadow: 0 10px 30px rgba(16, 24, 32, 0.06);
-  font-family:
-    'Segoe UI',
-    system-ui,
-    -apple-system,
-    sans-serif;
+  --font-ui: 'Manrope', 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces', 'Manrope', Georgia, serif;
+  font-family: var(--font-ui);
   color: var(--text);
-  background: var(--canvas);
+  background: var(--sidebar);
 }
 
 html,
 body,
 #root {
   margin: 0;
-  min-height: 100%;
+  width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
 button,
@@ -42,26 +41,32 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  min-height: 100%;
+  grid-template-columns: 248px minmax(0, 1fr);
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  background: var(--sidebar);
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   color: var(--sidebar-text);
   background:
     linear-gradient(180deg, rgba(12, 28, 44, 0.2), rgba(12, 28, 44, 0.92) 42%),
     linear-gradient(180deg, #10263a 0%, #0c1c2c 55%, #152433 100%);
-  padding: 1.25rem 1rem 1rem;
+  padding: 1.35rem 1rem 2rem;
 }
 
 .brand {
   display: flex;
   gap: 0.75rem;
   align-items: center;
-  margin: 0.25rem 0.5rem 1.5rem;
+  margin: 0.25rem 0.5rem 1.65rem;
+  flex-shrink: 0;
 }
 
 .brand-mark {
@@ -72,14 +77,15 @@ textarea {
   margin: 0;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  font-size: 0.82rem;
-  font-weight: 700;
+  font-size: 0.9rem;
+  font-weight: 800;
   color: #fff;
+  font-family: var(--font-ui);
 }
 
 .brand-tag {
-  margin: 0.15rem 0 0;
-  font-size: 0.72rem;
+  margin: 0.2rem 0 0;
+  font-size: 0.74rem;
   color: var(--sidebar-muted);
 }
 
@@ -87,6 +93,9 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .nav-item {
@@ -98,9 +107,10 @@ textarea {
   background: transparent;
   color: inherit;
   text-align: left;
-  padding: 0.7rem 0.85rem;
+  padding: 0.72rem 0.9rem;
   border-radius: 12px;
   cursor: pointer;
+  font-weight: 500;
 }
 
 .nav-item:hover,
@@ -110,17 +120,29 @@ textarea {
 }
 
 .nav-icon {
-  width: 1.1rem;
-  text-align: center;
-  opacity: 0.9;
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.15rem;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.92;
+  flex-shrink: 0;
+}
+
+.side-bottom {
+  margin-top: auto;
+  flex-shrink: 0;
+  padding: 1rem 0.35rem 1.75rem;
 }
 
 .side-quote {
-  margin-top: auto;
-  padding: 1.5rem 0.75rem 1rem;
+  margin: 0 0 0.85rem;
+  padding: 0 0.4rem;
   color: var(--sidebar-muted);
   font-size: 0.88rem;
   font-style: italic;
+  font-weight: 400;
+  font-family: var(--font-ui);
   line-height: 1.4;
 }
 
@@ -128,7 +150,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem;
+  padding: 0.55rem 0.4rem;
   color: var(--sidebar-muted);
   font-size: 0.82rem;
 }
@@ -137,7 +159,12 @@ textarea {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   background: var(--canvas);
+  border-radius: 28px 0 0 28px;
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.18);
 }
 
 .operator-bar {
@@ -147,7 +174,8 @@ textarea {
   gap: 1rem;
   padding: 0.9rem 1.75rem;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.92);
+  flex-shrink: 0;
 }
 
 .operator-context {
@@ -176,7 +204,9 @@ textarea {
 
 .workspace-main {
   flex: 1;
-  overflow: auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 1.5rem 1.75rem 2.5rem;
 }
 
@@ -193,8 +223,10 @@ textarea {
 
 h1 {
   margin: 0 0 0.4rem;
-  font-size: 2rem;
+  font-size: 2.05rem;
   letter-spacing: -0.03em;
+  font-family: var(--font-display);
+  font-weight: 700;
 }
 
 h2 {

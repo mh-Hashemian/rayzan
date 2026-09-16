@@ -121,6 +121,21 @@ document.getElementById('bind')?.addEventListener('click', () => {
       tabId: String(tab.id),
       available: true,
     });
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: 'wake-poll' });
+    } catch {
+      if (chrome.scripting?.executeScript !== undefined) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id, allFrames: true },
+            files: ['content.js'],
+          });
+          await chrome.tabs.sendMessage(tab.id, { type: 'wake-poll' });
+        } catch {
+          // User may need to reload the tab once after installing Grok match.
+        }
+      }
+    }
     await refresh();
   })().catch((error: unknown) => {
     if (errorEl) {

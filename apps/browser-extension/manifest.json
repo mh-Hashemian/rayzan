@@ -3,7 +3,7 @@
   "name": "Rayzan Bridge",
   "version": "0.0.0",
   "description": "Provider-independent browser bridge for local Rayzan",
-  "permissions": ["storage", "tabs", "alarms"],
+  "permissions": ["storage", "tabs", "alarms", "scripting"],
   "host_permissions": [
     "http://127.0.0.1:8787/*",
     "http://localhost:8787/*",
@@ -11,7 +11,8 @@
     "https://chat.openai.com/*",
     "https://chat.deepseek.com/*",
     "https://chat.qwen.ai/*",
-    "https://chat.z.ai/*"
+    "https://chat.z.ai/*",
+    "https://grok.com/*"
   ],
   "background": {
     "scripts": ["background.js"],
@@ -36,7 +37,8 @@
         "https://chat.openai.com/*",
         "https://chat.deepseek.com/*",
         "https://chat.qwen.ai/*",
-        "https://chat.z.ai/*"
+        "https://chat.z.ai/*",
+        "https://grok.com/*"
       ],
       "js": ["content.js"],
       "all_frames": true,

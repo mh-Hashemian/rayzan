@@ -53,7 +53,7 @@ describe('createRayzanServer default team', () => {
       const status = (await fetch(
         `http://127.0.0.1:${address.port}/api/status`,
       ).then((response) => response.json())) as RayzanDesktopStatus;
-      assert.equal(status.agents, 4);
+      assert.equal(status.agents, 5);
       assert.deepEqual(
         status.team.map((agent) => ({
           id: agent.id,
@@ -86,6 +86,12 @@ describe('createRayzanServer default team', () => {
             role: 'watcher',
             provider: 'Zhipu AI',
           },
+          {
+            id: 'grok',
+            name: 'Grok',
+            role: 'watcher',
+            provider: 'xAI',
+          },
         ],
       );
       await app.close();
@@ -113,8 +119,8 @@ describe('createRayzanServer bootstrap', () => {
       )) as RayzanDesktopStatus;
       assert.equal(before.database, 'connected');
       assert.equal(before.databasePath, first.databasePath);
-      assert.equal(before.agents, 4);
-      assert.equal(before.team.length, 4);
+      assert.equal(before.agents, 5);
+      assert.equal(before.team.length, 5);
       assert.equal(
         before.team.filter((agent) => agent.role === 'coordinator').length,
         1,
@@ -138,7 +144,7 @@ describe('createRayzanServer bootstrap', () => {
         `http://127.0.0.1:${secondAddress.port}/api/status`,
       ).then((response) => response.json())) as RayzanDesktopStatus;
       assert.equal(afterRestart.recovery.status, 'restored');
-      assert.equal(afterRestart.agents, 4);
+      assert.equal(afterRestart.agents, 5);
       assert.equal(
         afterRestart.team.find((agent) => agent.id === 'qwen')?.provider,
         'Alibaba Cloud',

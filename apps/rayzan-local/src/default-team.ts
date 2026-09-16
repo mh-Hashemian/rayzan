@@ -33,4 +33,10 @@ export const DEFAULT_TEAM: readonly DefaultTeamMember[] = [
     role: 'watcher',
     provider: 'Zhipu AI',
   },
+  {
+    id: 'grok',
+    name: 'Grok',
+    role: 'watcher',
+    provider: 'xAI',
+  },
 ];

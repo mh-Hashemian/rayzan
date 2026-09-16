@@ -33,6 +33,14 @@ import {
   glmTurnAfterSnapshot,
 } from '../src/adapters/glm.js';
 import {
+  grokAdapter,
+  grokAssistantTurns,
+  grokExtract,
+  grokIsGenerating,
+  grokSendControl,
+  grokStopControl,
+} from '../src/adapters/grok.js';
+import {
   qwenAdapter,
   qwenAssistantTurns,
   qwenExtract,
@@ -55,7 +63,10 @@ describe('browser adapters', () => {
     assert.equal(adapterFor('https://chat.openai.com/').id, 'chatgpt');
     assert.equal(adapterFor('https://chat.qwen.ai/c/guest').id, 'qwen');
     assert.equal(adapterFor('https://chat.z.ai/c/abc').id, 'glm');
+    assert.equal(adapterFor('https://grok.com/').id, 'grok');
+    assert.equal(adapterFor('https://grok.com/c/abc').id, 'grok');
     assert.equal(chatgptAdapter.canHandle('https://chat.qwen.ai/'), false);
+    assert.equal(grokAdapter.canHandle('https://chatgpt.com/'), false);
     assert.equal(fixtureAdapter.canHandle('https://chat.deepseek.com/'), false);
     assert.equal(
       deepSeekAdapter.canHandle('http://127.0.0.1:8787/fixture-chat'),
@@ -251,6 +262,62 @@ describe('browser adapters', () => {
       glmExtract(glmTurnAfterSnapshot(0, newerWithAnswer)),
       'Finished GLM answer',
     );
+  });
+
+  it('Grok fixture: chat-submit sends; stop aria means generating; markdown captured', () => {
+    const voiceOnly = parseHTML(`<div>
+      <div data-testid="chat-input"><div contenteditable="true" class="query-bar-editor"></div></div>
+      <button type="button" aria-label="Enter voice mode"></button>
+    </div>`).document;
+    assert.equal(grokSendControl(voiceOnly), undefined);
+    assert.equal(grokIsGenerating(voiceOnly), false);
+
+    const sendReady = parseHTML(`<div>
+      <div data-testid="chat-input">
+        <div contenteditable="true" class="query-bar-editor tiptap"><p>probe</p></div>
+      </div>
+      <button type="submit" data-testid="chat-submit" aria-label="ارسال"></button>
+    </div>`).document;
+    assert.equal(
+      grokSendControl(sendReady)?.getAttribute('data-testid'),
+      'chat-submit',
+    );
+
+    const generating = parseHTML(`<div>
+      <div data-testid="assistant-message" role="article" aria-label="Grok">
+        <div class="thinking-container">scratch</div>
+        <div class="response-content-markdown markdown"></div>
+      </div>
+      <button type="submit" data-testid="chat-submit" aria-label="توقف"></button>
+    </div>`).document;
+    assert.equal(grokAssistantTurns(generating).length, 1);
+    assert.equal(grokIsGenerating(generating), true);
+    assert.equal(grokSendControl(generating), undefined);
+    assert.ok(grokStopControl(generating));
+
+    const idleNoSend = parseHTML(`<div>
+      <div data-testid="assistant-message" role="article" aria-label="Grok">
+        <div class="thinking-container"></div>
+        <div class="response-content-markdown markdown"><p>done</p></div>
+      </div>
+      <button type="button" aria-label="ورود به حالت صوتی"></button>
+    </div>`).document;
+    assert.equal(grokIsGenerating(idleNoSend), false);
+
+    const done = parseHTML(`<div>
+      <div data-testid="user-message" role="article">سلام</div>
+      <div data-testid="assistant-message" role="article" aria-label="Grok">
+        <div class="thinking-container"></div>
+        <div class="response-content-markdown markdown"><p>سلام! كيف حالك؟</p></div>
+      </div>
+      <button type="submit" data-testid="chat-submit" aria-label="ارسال"></button>
+    </div>`).document;
+    assert.equal(grokIsGenerating(done), false);
+    assert.equal(
+      grokExtract(grokAssistantTurns(done)[0]),
+      'سلام! كيف حالك؟',
+    );
+    assert.equal(grokAdapter.providerLabel, 'Grok');
   });
 
   it('tracks the new assistant turn and does not fall back to an older last message', () => {

@@ -83,15 +83,14 @@ export function desktopStatus(
 }
 
 function teamConnection(
-  presenceConnected: boolean,
+  _presenceConnected: boolean,
   phase: string,
   bindingState: 'bound' | 'not-bound' | 'unavailable' | undefined,
 ): AgentConnection {
-  if (bindingState === 'unavailable' || phase === 'error') {
-    return 'error';
-  }
-  if (bindingState === 'bound' || presenceConnected) {
-    return 'connected';
+  // Only a live binding can be Connected/Error. Unbind and tab-close clear the
+  // binding (or mark it unavailable) and must read as Disconnected — not Error.
+  if (bindingState === 'bound') {
+    return phase === 'error' ? 'error' : 'connected';
   }
   return 'disconnected';
 }

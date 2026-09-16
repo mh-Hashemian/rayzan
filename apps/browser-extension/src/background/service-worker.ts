@@ -10,21 +10,38 @@ type BindingMap = Record<string, Binding>;
 
 const WAKE_ALARM = 'rayzan-wake-bound-tabs';
 
+async function ensureContentScript(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'wake-poll' });
+    return;
+  } catch {
+    // Content script missing (new host match, or tab open before reload).
+  }
+  if (chrome.scripting?.executeScript === undefined) {
+    return;
+  }
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['content.js'],
+    });
+  } catch {
+    return;
+  }
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'wake-poll' });
+  } catch {
+    // Page may still be loading.
+  }
+}
+
 async function wakeBoundTabs(): Promise<void> {
   const stored = await chrome.storage.local.get('bindings');
   const bindings = (stored.bindings ?? {}) as BindingMap;
   const tabIds = Object.keys(bindings)
     .map((key) => Number(key))
     .filter((id) => Number.isInteger(id));
-  await Promise.all(
-    tabIds.map(async (tabId) => {
-      try {
-        await chrome.tabs.sendMessage(tabId, { type: 'wake-poll' });
-      } catch {
-        // Tab may not have a content script yet.
-      }
-    }),
-  );
+  await Promise.all(tabIds.map((tabId) => ensureContentScript(tabId)));
 }
 
 void chrome.alarms.create(WAKE_ALARM, { periodInMinutes: 0.05 });

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import net from 'node:net';
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 
 import './native-sqlite.js';
 import {
@@ -136,10 +136,12 @@ function preloadPath(): string {
 }
 
 function createMainWindow(): void {
+  Menu.setApplicationMenu(null);
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
     title: 'Rayzan',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
@@ -147,6 +149,7 @@ function createMainWindow(): void {
       sandbox: true,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
   const rawDevUrl =
     process.env.VITE_DEV_SERVER_URL ?? process.env.ELECTRON_RENDERER_URL;
   const devUrl =
