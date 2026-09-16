@@ -1,6 +1,14 @@
+import { useEffect, useState } from 'react';
+
+import {
+  fetchRuntimeState,
+  retryCoordinatorDispatch,
+  type RuntimeDebateState,
+} from '../../api.js';
 import { AgentProgressCard } from './AgentProgressCard.js';
 import { DebateProgress } from './DebateProgress.js';
 import { DebateTimeline } from './DebateTimeline.js';
+import { deriveDebateView } from './derive.js';
 import { InsightsPanel } from './InsightsPanel.js';
 import { MOCK_DEBATE_VIEW } from './mock.js';
 import { TranscriptPanel } from './TranscriptPanel.js';
@@ -16,13 +24,106 @@ export function DebateWorkspace(input: {
   readonly launch: ActiveDecisionLaunch;
   readonly liveTick: number;
   readonly onBackHome: () => void;
-  readonly onViewDecision: () => void;
-  /** Checkpoint 1 uses mock layout; later checkpoints pass live view. */
-  readonly view?: DebateWorkspaceView;
-  readonly onRetryDispatch?: () => Promise<void>;
+  /** Prefer staying on this page to show the final report. */
+  readonly onViewDecision?: () => void;
+  readonly useMock?: boolean;
 }) {
-  const view = input.view ?? withLaunch(MOCK_DEBATE_VIEW, input.launch);
+  const [state, setState] = useState<RuntimeDebateState | undefined>();
+  const [loadError, setLoadError] = useState<string | undefined>();
+  const [retryBusy, setRetryBusy] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+
+  useEffect(() => {
+    if (input.useMock) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await fetchRuntimeState();
+        if (!cancelled) {
+          setState(next);
+          setLoadError(undefined);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : 'Could not load debate state',
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [input.liveTick, input.useMock]);
+
+  const view: DebateWorkspaceView = input.useMock
+    ? {
+        ...MOCK_DEBATE_VIEW,
+        title: input.launch.question || MOCK_DEBATE_VIEW.title,
+      }
+    : state
+      ? deriveDebateView(state, input.launch.question)
+      : {
+          title: input.launch.question || 'Active decision',
+          subtitle: 'Loading live debate state…',
+          badge: 'Preparing',
+          stages: [
+            {
+              id: 'reframe',
+              label: 'Reframe',
+              detail: 'Clarify the question',
+              status: 'waiting',
+            },
+            {
+              id: 'round1',
+              label: 'Round 1',
+              detail: 'Initial perspectives',
+              status: 'waiting',
+            },
+            {
+              id: 'challenge',
+              label: 'Challenge',
+              detail: 'Deepen the analysis',
+              status: 'waiting',
+            },
+            {
+              id: 'synthesis',
+              label: 'Synthesis',
+              detail: 'Integrate insights',
+              status: 'waiting',
+            },
+            {
+              id: 'decision',
+              label: 'Decision',
+              detail: 'Final recommendation',
+              status: 'waiting',
+            },
+          ],
+          details: [],
+          agents: [],
+          timeline: [],
+          transcript: [],
+          insights: { agreement: [], disagreement: [], risks: [] },
+        };
+
   const complete = view.badge === 'Completed' && view.synthesis !== undefined;
+  const showingFinal = complete || (showReport && view.synthesis !== undefined);
+
+  async function retryDispatch() {
+    setRetryBusy(true);
+    try {
+      const next = await retryCoordinatorDispatch();
+      setState(next);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Retry failed');
+    } finally {
+      setRetryBusy(false);
+    }
+  }
 
   return (
     <section className="page obs-workspace">
@@ -45,7 +146,12 @@ export function DebateWorkspace(input: {
           <button
             type="button"
             className="btn"
-            onClick={input.onViewDecision}
+            onClick={() => {
+              if (view.synthesis) {
+                setShowReport(true);
+              }
+              input.onViewDecision?.();
+            }}
           >
             View Decision Details
           </button>
@@ -55,26 +161,40 @@ export function DebateWorkspace(input: {
         </div>
       </header>
 
+      {loadError ? (
+        <div className="error-panel">
+          <p>{loadError}</p>
+        </div>
+      ) : null}
+
       {view.lastError || view.canRetryCoordinatorDispatch ? (
         <div className="error-panel">
           <p>Rayzan could not continue this decision.</p>
-          {view.lastError ? <p className="review-copy">{view.lastError}</p> : null}
-          {view.canRetryCoordinatorDispatch && input.onRetryDispatch ? (
+          {view.lastError ? (
+            <p className="review-copy">{view.lastError}</p>
+          ) : (
+            <p className="review-copy">
+              Coordinator framing completed, but Watcher prompts were not
+              queued.
+            </p>
+          )}
+          {view.canRetryCoordinatorDispatch ? (
             <button
               type="button"
               className="btn"
+              disabled={retryBusy}
               onClick={() => {
-                void input.onRetryDispatch?.();
+                void retryDispatch();
               }}
             >
-              Retry Watcher dispatch
+              {retryBusy ? 'Retrying…' : 'Retry Watcher dispatch'}
             </button>
           ) : null}
         </div>
       ) : null}
 
-      {complete ? (
-        <section className="obs-final card-panel">
+      {showingFinal ? (
+        <section className="obs-final card-panel" id="final-report">
           <p className="obs-eyebrow">Decision Complete</p>
           <h2>Final Coordinator Report</h2>
           <pre className="obs-report">{view.synthesis}</pre>
@@ -82,13 +202,29 @@ export function DebateWorkspace(input: {
             <button
               type="button"
               className="btn primary"
-              onClick={input.onViewDecision}
+              onClick={() => {
+                setShowReport(true);
+                document
+                  .getElementById('final-report')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
             >
               View Report
             </button>
             <button type="button" className="btn" disabled>
               Export
             </button>
+            {!complete ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setShowReport(false);
+                }}
+              >
+                Back to live view
+              </button>
+            ) : null}
           </div>
         </section>
       ) : (
@@ -120,16 +256,6 @@ export function DebateWorkspace(input: {
       )}
     </section>
   );
-}
-
-function withLaunch(
-  mock: DebateWorkspaceView,
-  launch: ActiveDecisionLaunch,
-): DebateWorkspaceView {
-  return {
-    ...mock,
-    title: launch.question || mock.title,
-  };
 }
 
 function badgeClass(badge: DebateWorkspaceView['badge']): string {

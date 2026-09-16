@@ -53,9 +53,18 @@ export interface RuntimeDebateState {
     readonly id: string;
     readonly name: string;
     readonly role: string;
+    readonly provider?: string;
+    readonly phase?: string;
     readonly round1Status: string;
     readonly round2Status: string;
     readonly enabled: boolean;
+  }[];
+  readonly messages?: readonly {
+    readonly id: string;
+    readonly senderId: string;
+    readonly recipientIds: readonly string[];
+    readonly kind: string;
+    readonly body: string;
   }[];
   readonly synthesis?: {
     readonly debateId: string;

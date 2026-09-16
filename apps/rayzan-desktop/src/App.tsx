@@ -217,9 +217,6 @@ export function App() {
               onBackHome={() => {
                 setPage('home');
               }}
-              onViewDecision={() => {
-                setPage('debates');
-              }}
             />
           ) : null}
           {ready &&

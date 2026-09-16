@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3C.2 Step 5 — Start Decision connected to debate runtime (waiting for Operator validation)
+Current phase: Phase 3C.3 — Debate Workspace / Observatory UI (live-connected)
 
 Completed:
 
@@ -27,13 +27,13 @@ Completed:
 - 3C.2 Step 1.5: stable connection state, SSE live updates, provider logos, coordinator switching, watcher participation
 - 3C.2 Step 2 (UI): New Decision wizard — define question, select team, review plan
 - 3C.2 Step 5: Start Decision → existing `run-live-round` path + Active Decision workspace (SSE stages)
+- 3C.3 Checkpoint 1: Debate Workspace observatory layout (static mock)
+- 3C.3 Checkpoints 2–4: progress, agent cards, synthesis wired to `/api/state` + SSE
 
 Currently being worked on:
 
-- None (waiting for Operator validation of the end-to-end Start Decision loop)
+- None (waiting for Operator validation of Debate Workspace watching loop)
 
 Next:
 
-- 3C.2 Step 3: Debate workspace (beyond temporary Active Decision page)
-- 3C.2 Step 4: Observatory inside a debate
-- Operator intervention
+- Observatory refinements / Operator intervention

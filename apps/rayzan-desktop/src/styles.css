@@ -918,19 +918,24 @@ h2 {
 .obs-stages {
   list-style: none;
   margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.5rem;
+  padding: 0.25rem 0 0;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 0.35rem;
+  align-items: flex-start;
 }
 
 .obs-stage {
   position: relative;
+  flex: 1 1 0;
   display: grid;
   justify-items: center;
   text-align: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
   color: var(--text-muted);
+  padding: 0 0.25rem;
+  min-width: 0;
 }
 
 .obs-stage.completed,
