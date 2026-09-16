@@ -14,7 +14,7 @@ export interface DesktopApi {
 
 declare global {
   interface Window {
-    readonly rayzanDesktop: DesktopApi;
+    readonly rayzanDesktop?: DesktopApi;
   }
 }
 

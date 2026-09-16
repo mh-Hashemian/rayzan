@@ -137,8 +137,8 @@ function preloadPath(): string {
 
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 880,
-    height: 720,
+    width: 1280,
+    height: 840,
     title: 'Rayzan',
     webPreferences: {
       preload: preloadPath(),

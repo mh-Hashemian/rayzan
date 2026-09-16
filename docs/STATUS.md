@@ -1,6 +1,6 @@
 # Status
 
-Current phase: Phase 3C.1 — Electron better-sqlite3 ABI isolation (waiting for Operator validation)
+Current phase: Phase 3C.2 Step 1 — Product home interface (waiting for Operator validation)
 
 Completed:
 
@@ -23,16 +23,17 @@ Completed:
 - Checkpoint 3C.1: Rayzan Desktop foundation (Electron + React shell, shared `createRayzanServer`)
 - Checkpoint 3C.1.1: debate history + at most one active debate (waiting for Operator validation)
 - 3C.1 follow-up: isolate Electron better-sqlite3 (ABI 128) from the CLI Node binary (ABI 115)
+- 3C.2 Step 1: product home shell (sidebar, operator bar, AI team, recent debates)
 
 Currently being worked on:
 
-- None (waiting for Operator validation of 3C.1 Electron better-sqlite3 ABI isolation)
+- None (waiting for Operator validation of 3C.2 Step 1 product home)
 
 Next:
 
-- UI/UX redesign of the Electron product (after 3C.1.1 is accepted)
-- 3C.2: Agent and browser workspace
-- Debate Observatory
+- 3C.2 Step 2: New Decision wizard
+- 3C.2 Step 3: Debate workspace
+- 3C.2 Step 4: Observatory inside a debate
 - Operator intervention
 
 Blockers:

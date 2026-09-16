@@ -531,4 +531,14 @@ Rayzan preserves multiple debates historically but permits at most one active de
 Reason:
 Restored completed debates must not block future work, and wiping SQLite or deleting history is not an acceptable way to start again.
 
+## DEC-053 — Rayzan Desktop Step 1 is a decision-intelligence product home, not a chatbot shell
+
+Status: Accepted
+
+Decision:
+3C.2 Step 1 replaces the engineering status page with a product home: left navigation, operator bar, and a workspace that surfaces the problem, the AI team, and debate history. Global navigation is Home, New Decision, Debates, Library, and Settings. Observatory is not a top-level item; it belongs inside a debate. Agent cards show role first and provider second. System/runtime details move to Settings. `/debug` remains available from Settings. This checkpoint does not create debates or change the runtime.
+
+Reason:
+The Operator needs a product-shaped window to judge direction before the wizard, workspace, and Observatory are built.
+
 

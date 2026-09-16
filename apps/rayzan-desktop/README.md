@@ -15,11 +15,11 @@ Development CLI (`pnpm start:local`) is unchanged. Desktop is not required for b
 - CLI: `apps/rayzan-local/data/rayzan.sqlite`
 - Desktop: `%APPDATA%\Rayzan\rayzan.sqlite` (`app.getPath('userData')`)
 
-The home screen shows the resolved paths.
+The Settings screen shows the resolved paths. The home screen is the product shell (team, recent debates), not the engineering dashboard.
 
 ## Debug UI
 
-Engineering dashboard: `http://127.0.0.1:8787/debug` (Open Workspace).
+Engineering dashboard: `http://127.0.0.1:8787/debug` (Settings → Open debug workspace). Observatory is not in global navigation.
 
 ## Native SQLite
 
