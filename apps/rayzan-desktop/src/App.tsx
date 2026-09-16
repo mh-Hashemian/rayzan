@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   changeCoordinator,
+  debateTitle,
   fetchDesktopStatus,
   openRuntimeEventStream,
   setWatcherParticipation,
@@ -10,7 +11,7 @@ import {
 import {
   DebateWorkspace,
   type ActiveDecisionLaunch,
-} from './components/DebateWorkspace.js';
+} from './components/debate/index.js';
 import { DebatesView } from './components/DebatesView.js';
 import { DecisionWizard } from './components/decision/DecisionWizard.js';
 import { HomeView } from './components/HomeView.js';
@@ -21,6 +22,19 @@ import type { DesktopInfo } from './desktop.js';
 import type { ProductPage } from './navigation.js';
 
 type Hydration = 'loading' | 'ready' | 'error';
+
+function launchFromStatus(status: RayzanDesktopStatus): ActiveDecisionLaunch {
+  const debate = status.activeDebate;
+  return {
+    question: debate ? debateTitle(debate.topic) : 'Active decision',
+    coordinatorName:
+      status.team.find((agent) => agent.role === 'coordinator')?.name ??
+      'Coordinator',
+    watcherNames: status.team
+      .filter((agent) => agent.role === 'watcher' && agent.enabled)
+      .map((agent) => agent.name),
+  };
+}
 
 export function App() {
   const [page, setPage] = useState<ProductPage>('home');
@@ -147,7 +161,13 @@ export function App() {
           {ready && page === 'home' && status !== undefined ? (
             <HomeView
               status={status}
-              onNavigate={setPage}
+              onNavigate={(next) => {
+                if (next === 'active-decision' && status.activeDebate) {
+                  setLaunch(launchFromStatus(status));
+                  setLiveTick((tick) => tick + 1);
+                }
+                setPage(next);
+              }}
               onChangeCoordinator={async (agentId) => {
                 const next = await changeCoordinator(agentId);
                 setStatus(next);
@@ -179,9 +199,20 @@ export function App() {
               }}
             />
           ) : null}
-          {ready && page === 'active-decision' && launch !== undefined ? (
+          {ready &&
+          page === 'active-decision' &&
+          (launch !== undefined || status?.activeDebate) ? (
             <DebateWorkspace
-              launch={launch}
+              launch={
+                launch ??
+                (status !== undefined
+                  ? launchFromStatus(status)
+                  : {
+                      question: 'Active decision',
+                      coordinatorName: 'Coordinator',
+                      watcherNames: [],
+                    })
+              }
               liveTick={liveTick}
               onBackHome={() => {
                 setPage('home');
@@ -191,7 +222,10 @@ export function App() {
               }}
             />
           ) : null}
-          {ready && page === 'active-decision' && launch === undefined ? (
+          {ready &&
+          page === 'active-decision' &&
+          launch === undefined &&
+          status?.activeDebate == null ? (
             <section className="page">
               <h1>Active Decision</h1>
               <p className="lede">
@@ -209,7 +243,17 @@ export function App() {
             </section>
           ) : null}
           {ready && page === 'debates' ? (
-            <DebatesView debates={status?.debateHistory ?? []} />
+            <DebatesView
+              debates={status?.debateHistory ?? []}
+              activeDebate={status?.activeDebate ?? null}
+              onOpenActive={() => {
+                if (status?.activeDebate) {
+                  setLaunch(launchFromStatus(status));
+                  setLiveTick((tick) => tick + 1);
+                  setPage('active-decision');
+                }
+              }}
+            />
           ) : null}
           {ready && page === 'library' ? <LibraryView /> : null}
           {ready && page === 'settings' ? (
