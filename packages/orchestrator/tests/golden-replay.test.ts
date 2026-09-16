@@ -65,6 +65,10 @@ function harness() {
     registerAgent: (agent) => {
       agents.register(agent);
     },
+    replaceAgent: (agent) => {
+      agents.replace(agent);
+    },
+    setWatcherParticipation: () => undefined,
     getDebate: (id) => debates.getById(id as never),
     createDebate: (debate) => {
       debates.create(debate);

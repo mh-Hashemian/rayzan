@@ -4,6 +4,7 @@ import { ProtocolError } from '../validate.js';
 
 export interface AgentRegistry {
   register(agent: Agent): Agent;
+  replace(agent: Agent): Agent;
   getById(id: AgentId): Agent | undefined;
   list(): readonly Agent[];
   listByRole(role: AgentRole): readonly Agent[];
@@ -17,6 +18,14 @@ export class InMemoryAgentRegistry implements AgentRegistry {
       throw new ProtocolError(`agent id already exists: ${agent.id}`);
     }
 
+    this.#agents.set(agent.id, agent);
+    return agent;
+  }
+
+  replace(agent: Agent): Agent {
+    if (!this.#agents.has(agent.id)) {
+      throw new ProtocolError(`unknown agent id: ${agent.id}`);
+    }
     this.#agents.set(agent.id, agent);
     return agent;
   }

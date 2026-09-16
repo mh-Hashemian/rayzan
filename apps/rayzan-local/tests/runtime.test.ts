@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { asDebateId } from '@rayzan/protocol';
+import { InMemoryEventStore } from '@rayzan/storage';
 
 import { RayzanRuntime } from '../src/runtime.js';
 
@@ -537,6 +538,104 @@ describe('presence', () => {
     assert.match(
       String(runtime.snapshot().lastError),
       /send button stayed disabled/,
+    );
+  });
+});
+
+describe('changeCoordinator', () => {
+  it('swaps roles, keeps history, and does not rewrite an existing debate', () => {
+    const runtime = new RayzanRuntime();
+    const { coordinator, qwen, glm } = registerTrio(runtime);
+    runtime.createRound1('Keep existing debate participants');
+    const before = runtime.snapshot();
+    runtime.changeCoordinator(qwen.id);
+    const after = runtime.snapshot();
+    assert.equal(
+      after.agents.find((agent) => agent.id === coordinator.id)?.role,
+      'watcher',
+    );
+    assert.equal(
+      after.agents.find((agent) => agent.id === qwen.id)?.role,
+      'coordinator',
+    );
+    assert.equal(
+      after.agents.filter((agent) => agent.role === 'coordinator').length,
+      1,
+    );
+    assert.deepEqual(
+      after.participants.map((participant) => participant.id),
+      before.participants.map((participant) => participant.id),
+    );
+    assert.equal(glm.role, 'watcher');
+    const changed = runtime.events
+      .listAll()
+      .filter((event) => event.type === 'COORDINATOR_CHANGED');
+    assert.equal(changed.length, 1);
+    const payload = changed[0]!.payload as {
+      previousAgentId: string;
+      newAgentId: string;
+      timestamp: string;
+    };
+    assert.equal(payload.previousAgentId, coordinator.id);
+    assert.equal(payload.newAgentId, qwen.id);
+    assert.ok(payload.timestamp);
+  });
+
+  it('refuses to make the Operator the Coordinator', () => {
+    const runtime = new RayzanRuntime();
+    registerTrio(runtime);
+    assert.throws(
+      () => runtime.changeCoordinator('operator'),
+      /Operator cannot become Coordinator/,
+    );
+  });
+});
+
+describe('watcher participation', () => {
+  it('lets the Operator exclude a Watcher from the next debate only', () => {
+    const runtime = new RayzanRuntime();
+    const { qwen, glm } = registerTrio(runtime);
+    runtime.createRound1('Keep existing debate participants');
+    const before = runtime.snapshot();
+    runtime.setWatcherParticipation(glm.id, false);
+    assert.equal(
+      runtime.snapshot().agents.find((agent) => agent.id === glm.id)?.enabled,
+      false,
+    );
+    assert.deepEqual(
+      runtime.snapshot().participants.map((participant) => participant.id),
+      before.participants.map((participant) => participant.id),
+    );
+    runtime.archiveActiveDebate();
+    runtime.createRound1('Only included Watchers join');
+    assert.deepEqual(
+      runtime.snapshot().participants.map((participant) => participant.id),
+      [qwen.id],
+    );
+  });
+
+  it('refuses to toggle the Coordinator or Operator', () => {
+    const runtime = new RayzanRuntime();
+    const { coordinator } = registerTrio(runtime);
+    assert.throws(
+      () => runtime.setWatcherParticipation(coordinator.id, false),
+      /Only Watchers/,
+    );
+    assert.throws(
+      () => runtime.setWatcherParticipation('operator', false),
+      /Only Watchers/,
+    );
+  });
+
+  it('restores excluded Watchers from the event log', () => {
+    const events = new InMemoryEventStore();
+    const first = new RayzanRuntime(events);
+    const { glm } = registerTrio(first);
+    first.setWatcherParticipation(glm.id, false);
+    const restored = new RayzanRuntime(events);
+    assert.equal(
+      restored.snapshot().agents.find((agent) => agent.id === glm.id)?.enabled,
+      false,
     );
   });
 });

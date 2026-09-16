@@ -10,4 +10,4 @@ export {
   type CreateRayzanServerOptions,
   type RayzanServer,
 } from './server.js';
-export { desktopStatus, type RayzanDesktopStatus } from './status.js';
+export { desktopStatus, type AgentConnection, type RayzanDesktopStatus, type TeamAgentView } from './status.js';

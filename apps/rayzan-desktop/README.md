@@ -15,7 +15,7 @@ Development CLI (`pnpm start:local`) is unchanged. Desktop is not required for b
 - CLI: `apps/rayzan-local/data/rayzan.sqlite`
 - Desktop: `%APPDATA%\Rayzan\rayzan.sqlite` (`app.getPath('userData')`)
 
-The Settings screen shows the resolved paths. The home screen is the product shell (team, recent debates), not the engineering dashboard.
+The Settings screen shows the resolved paths. The home screen is the product shell (team, recent debates), not the engineering dashboard. It hydrates from `GET /api/status` once, then listens to `GET /api/events/stream`. It does not poll.
 
 ## Debug UI
 

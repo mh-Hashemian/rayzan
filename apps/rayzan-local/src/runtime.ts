@@ -10,6 +10,7 @@ import {
   asMessageId,
   asRoundId,
   createAgent,
+  withAgentRole,
   createDebate,
   createDebateSynthesis,
   createRound,
@@ -144,6 +145,7 @@ export interface RayzanSnapshot {
     readonly round1Status: string;
     readonly round2Status: string;
     readonly capture?: BrowserCaptureState;
+    readonly enabled: boolean;
   }[];
   readonly deliveries: readonly {
     readonly id: string;
@@ -264,6 +266,8 @@ export class RayzanRuntime {
       error?: string;
     }
   >();
+  #eventListeners = new Set<(event: Event) => void>();
+  #participation = new Map<string, boolean>();
 
   constructor(events: EventStore = new InMemoryEventStore()) {
     this.events = events;
@@ -313,6 +317,62 @@ export class RayzanRuntime {
     return agent;
   }
 
+  onEvent(listener: (event: Event) => void): () => void {
+    this.#eventListeners.add(listener);
+    return () => {
+      this.#eventListeners.delete(listener);
+    };
+  }
+
+  changeCoordinator(newAgentId: string): void {
+    const next = this.#requireAgent(newAgentId);
+    if (next.role === 'operator') {
+      throw new Error('Operator cannot become Coordinator');
+    }
+    const current = this.#requireSingleCoordinator();
+    if (current.id === next.id) {
+      return;
+    }
+    this.agents.replace(withAgentRole(current, 'watcher'));
+    this.agents.replace(withAgentRole(next, 'coordinator'));
+    this.#emit('COORDINATOR_CHANGED', {
+      correlationId: `coordinator:${next.id}`,
+      payload: {
+        previousAgentId: current.id,
+        newAgentId: next.id,
+        timestamp: new Date().toISOString(),
+      },
+    });
+    this.#record(
+      `Coordinator changed from ${current.name} to ${next.name}. Existing debates are unchanged.`,
+    );
+  }
+
+  setWatcherParticipation(agentId: string, enabled: boolean): void {
+    const agent = this.#requireAgent(agentId);
+    if (agent.role !== 'watcher') {
+      throw new Error('Only Watchers can be included or excluded from a debate');
+    }
+    if (this.#watcherEnabled(agent) === enabled) {
+      return;
+    }
+    this.#participation.set(agent.id, enabled);
+    this.#emit('WATCHER_PARTICIPATION_CHANGED', {
+      agentId: agent.id,
+      correlationId: `agent:${agent.id}`,
+      payload: {
+        agentId: agent.id,
+        enabled,
+        timestamp: new Date().toISOString(),
+      },
+    });
+    this.#record(
+      enabled
+        ? `${agent.name} will join the next debate.`
+        : `${agent.name} will be skipped in the next debate. Existing debates are unchanged.`,
+    );
+  }
+
   /**
    * Temporary Phase 3A bootstrap. Creates one active Debate and Round 1
    * because the Coordinator `start-round` command is intentionally deferred.
@@ -326,9 +386,9 @@ export class RayzanRuntime {
       throw new Error('problem cannot be empty');
     }
     this.#requireSingleCoordinator();
-    const watchers = this.agents.listByRole('watcher');
+    const watchers = this.#watchersForNewDebate();
     if (watchers.length < 1) {
-      throw new Error('register at least one Watcher before creating Round 1');
+      throw new Error('include at least one Watcher in the next debate');
     }
 
     const debateId = this.#nextId('debate');
@@ -395,10 +455,10 @@ export class RayzanRuntime {
     if (this.#coordinatorBriefSent) {
       throw new Error('Coordinator Round 1 prompt already queued');
     }
-    const watchers = this.agents.listByRole('watcher');
+    const watchers = this.#watchersForNewDebate();
     if (watchers.length < 2) {
       throw new Error(
-        'register at least two Watchers before running live Round 1',
+        'include at least two Watchers in the next debate',
       );
     }
     const coordinator = this.#requireSingleCoordinator();
@@ -472,13 +532,32 @@ export class RayzanRuntime {
     error?: string;
   }): void {
     const agent = this.#requireAgent(input.agentId);
-    this.#bindings.set(agent.id, {
+    const previous = this.#bindings.get(agent.id);
+    const next = {
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.tabId ? { tabId: input.tabId } : {}),
       lastSeen: Date.now(),
       available: input.available,
       ...(input.error ? { error: input.error } : {}),
-    });
+    };
+    this.#bindings.set(agent.id, next);
+    const state = this.#bindingSnapshot(agent, Date.now()).state;
+    if (
+      previous === undefined ||
+      previous.available !== next.available ||
+      previous.provider !== next.provider
+    ) {
+      this.#emit('BINDING_CHANGED', {
+        agentId: agent.id,
+        correlationId: `agent:${agent.id}`,
+        payload: {
+          agentId: agent.id,
+          ...(next.provider !== undefined ? { provider: next.provider } : {}),
+          available: next.available,
+          state,
+        },
+      });
+    }
     this.#record(
       input.available
         ? `Browser binding set for ${agent.name}${input.provider ? ` (${input.provider})` : ''}.`
@@ -726,6 +805,7 @@ export class RayzanRuntime {
           ...(response ? { response } : {}),
           round1Status: this.#round1Status(agent),
           round2Status: this.#round2Status(agent),
+          enabled: this.#watcherEnabled(agent),
           ...(presence?.capture ? { capture: presence.capture } : {}),
         };
       }),
@@ -1518,6 +1598,16 @@ export class RayzanRuntime {
     });
   }
 
+  #watcherEnabled(agent: Agent): boolean {
+    return this.#participation.get(agent.id) !== false;
+  }
+
+  #watchersForNewDebate(): readonly Agent[] {
+    return this.agents
+      .listByRole('watcher')
+      .filter((watcher) => this.#watcherEnabled(watcher));
+  }
+
   #requireSingleCoordinator(): Agent {
     const coordinators = this.agents.listByRole('coordinator');
     if (coordinators.length !== 1) {
@@ -1691,7 +1781,11 @@ export class RayzanRuntime {
       payload?: unknown;
     },
   ): Event {
-    return recordEvent(this.events, { type, ...input });
+    const event = recordEvent(this.events, { type, ...input });
+    for (const listener of this.#eventListeners) {
+      listener(event);
+    }
+    return event;
   }
 
   #lastEventId(type: EventType): string | undefined {
@@ -1745,6 +1839,7 @@ export class RayzanRuntime {
 
   #rehydrate(): ReplayResult {
     const events = this.events.listAll();
+    this.#participation.clear();
     if (events.length === 0) {
       this.#bootstrapOperator();
       return emptyReplayResult('FRESH');
@@ -1848,6 +1943,12 @@ export class RayzanRuntime {
       getAgent: (id) => this.agents.getById(asAgentId(id)),
       registerAgent: (agent) => {
         this.agents.register(agent);
+      },
+      replaceAgent: (agent) => {
+        this.agents.replace(agent);
+      },
+      setWatcherParticipation: (agentId, enabled) => {
+        this.#participation.set(agentId, enabled);
       },
       getDebate: (id) => this.debates.getById(asDebateId(id)),
       createDebate: (debate) => {
@@ -2003,6 +2104,19 @@ export class RayzanRuntime {
         return `${name} (${role})`;
       }
       return this.#agentLabel(event.agentId);
+    }
+    if (event.type === 'COORDINATOR_CHANGED') {
+      const previous = this.#agentLabel(stringField(payload, 'previousAgentId'));
+      const next = this.#agentLabel(stringField(payload, 'newAgentId'));
+      return `${previous} → ${next}`;
+    }
+    if (event.type === 'WATCHER_PARTICIPATION_CHANGED') {
+      const name = this.#agentLabel(
+        stringField(payload, 'agentId') ?? event.agentId,
+      );
+      return payload.enabled === false
+        ? `${name} excluded from next debate`
+        : `${name} included in next debate`;
     }
     if (event.type === 'SYNTHESIS_CREATED') {
       return this.#agentLabel(

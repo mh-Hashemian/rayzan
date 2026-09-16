@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createAgent } from './agent.js';
+import { createAgent, withAgentRole } from './agent.js';
 import { ProtocolError } from './validate.js';
 
 describe('Agent', () => {
@@ -22,6 +22,18 @@ describe('Agent', () => {
     assert.notEqual(deepSeek.id, qwen.id);
     assert.notEqual(deepSeek.name, qwen.name);
     assert.deepEqual(Object.keys(deepSeek).sort(), ['id', 'name', 'role']);
+  });
+
+  it('withAgentRole keeps id and name', () => {
+    const watcher = createAgent({
+      id: 'deepseek',
+      name: 'DeepSeek',
+      role: 'watcher',
+    });
+    const coordinator = withAgentRole(watcher, 'coordinator');
+    assert.equal(coordinator.id, watcher.id);
+    assert.equal(coordinator.name, watcher.name);
+    assert.equal(coordinator.role, 'coordinator');
   });
 
   it('rejects empty ids and names', () => {

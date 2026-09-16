@@ -14,6 +14,9 @@ External side effects use request → terminal (`confirmed` or `failed`). A `REQ
 | Event | Purpose | Schema | Canonical payload | Causation | Correlation | Replay effect | External |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `AGENT_REGISTERED` | Record an agent | 1 | `id`, `name`, `role` | none | `agent:{id}` | register agent | no |
+| `COORDINATOR_CHANGED` | Swap which registered agent is Coordinator | 1 | `previousAgentId`, `newAgentId`, `timestamp` | none | `coordinator:{newId}` | previous → watcher, new → coordinator; does not rewrite debates | no |
+| `WATCHER_PARTICIPATION_CHANGED` | Include or exclude a Watcher from future debates | 1 | `agentId`, `enabled`, `timestamp` | none | `agent:{id}` | restore participation; does not rewrite debates | no |
+| `BINDING_CHANGED` | Browser binding became available or unavailable | 1 | `agentId`, `provider?`, `available`, `state` | none | `agent:{id}` | none (live signal; bindings are not restored) | no |
 | `DEBATE_CREATED` | Record a debate | 1 | `topic`, `status`, `createdAt` | none | `debate:{id}` | create debate | no |
 | `DEBATE_ARCHIVED` | Close an open debate into history without deleting events | 1 | `previousStatus`, `status: archived` | debate create or later lifecycle | `debate:{id}` | set debate archived | no |
 | `ROUND_CREATED` | Record a round | 1 | `number`, `participantIds` | debate or previous round completion | `round:{id}` | create round; restore execution when `participantIds` present | no |

@@ -5,6 +5,7 @@ import {
   asDebateId,
   asMessageId,
   createAgent,
+  withAgentRole,
   createDebate,
   createDebateSynthesis,
   createExposureRecord,
@@ -73,6 +74,7 @@ export interface ReplayResult {
 export interface ReplayTarget {
   getAgent(id: string): Agent | undefined;
   registerAgent(agent: Agent): void;
+  replaceAgent(agent: Agent): void;
   getDebate(id: string): Debate | undefined;
   createDebate(debate: Debate): void;
   updateDebate(debate: Debate): void;
@@ -104,6 +106,7 @@ export interface ReplayTarget {
     deliveryId: string,
     referencedMessageIds: readonly string[],
   ): void;
+  setWatcherParticipation(agentId: string, enabled: boolean): void;
   listDeliveries(): readonly OutboundDelivery[];
 }
 
@@ -247,6 +250,12 @@ export class EventReplayer {
       switch (event.type) {
         case 'AGENT_REGISTERED':
           return this.#agentRegistered(event, target);
+        case 'COORDINATOR_CHANGED':
+          return this.#coordinatorChanged(event, target);
+        case 'WATCHER_PARTICIPATION_CHANGED':
+          return this.#watcherParticipationChanged(event, target);
+        case 'BINDING_CHANGED':
+          return { kind: 'applied' };
         case 'DEBATE_CREATED':
           return this.#debateCreated(event, target);
         case 'DEBATE_ARCHIVED':
@@ -312,6 +321,53 @@ export class EventReplayer {
     }
     target.registerAgent(createAgent({ id, name, role }));
     return { kind: 'applied', agents: 1 };
+  }
+
+  #coordinatorChanged(event: Event, target: ReplayTarget): ApplyOutcome {
+    const payload = asPayload(event.payload);
+    const previousId = stringField(payload, 'previousAgentId');
+    const newId = stringField(payload, 'newAgentId');
+    if (previousId === undefined || newId === undefined) {
+      return historical('COORDINATOR_CHANGED lacks previousAgentId or newAgentId');
+    }
+    const previous = target.getAgent(previousId);
+    const next = target.getAgent(newId);
+    if (previous === undefined) {
+      return integrity(
+        `COORDINATOR_CHANGED references unknown previous agent: ${previousId}`,
+      );
+    }
+    if (next === undefined) {
+      return integrity(
+        `COORDINATOR_CHANGED references unknown new agent: ${newId}`,
+      );
+    }
+    if (previousId !== newId) {
+      target.replaceAgent(withAgentRole(previous, 'watcher'));
+      target.replaceAgent(withAgentRole(next, 'coordinator'));
+    }
+    return { kind: 'applied' };
+  }
+
+  #watcherParticipationChanged(
+    event: Event,
+    target: ReplayTarget,
+  ): ApplyOutcome {
+    const payload = asPayload(event.payload);
+    const agentId = stringField(payload, 'agentId') ?? event.agentId;
+    const enabled = booleanField(payload, 'enabled');
+    if (agentId === undefined || enabled === undefined) {
+      return historical(
+        'WATCHER_PARTICIPATION_CHANGED lacks agentId or enabled',
+      );
+    }
+    if (target.getAgent(agentId) === undefined) {
+      return integrity(
+        `WATCHER_PARTICIPATION_CHANGED references unknown agent: ${agentId}`,
+      );
+    }
+    target.setWatcherParticipation(agentId, enabled);
+    return { kind: 'applied' };
   }
 
   #debateCreated(event: Event, target: ReplayTarget): ApplyOutcome {
@@ -643,6 +699,14 @@ function stringField(
   return typeof value === 'string' && value.trim().length > 0
     ? value
     : undefined;
+}
+
+function booleanField(
+  payload: Record<string, unknown>,
+  key: string,
+): boolean | undefined {
+  const value = payload[key];
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 function numberField(

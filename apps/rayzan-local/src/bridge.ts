@@ -4,6 +4,7 @@ import { AGENT_ROLES, type AgentRole } from '@rayzan/protocol';
 
 import { RayzanRuntime } from './runtime.js';
 import { desktopStatus } from './status.js';
+import { attachEventStream } from './event-stream.js';
 
 export interface BridgeContext {
   readonly databasePath?: string;
@@ -35,6 +36,10 @@ export async function handleBridgeRequest(
   try {
     if (request.method === 'GET' && url.pathname === '/api/health') {
       write(response, 200, { ok: true });
+      return true;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/events/stream') {
+      attachEventStream(runtime, request, response);
       return true;
     }
     if (request.method === 'GET' && url.pathname === '/api/status') {
@@ -165,6 +170,27 @@ export async function handleBridgeRequest(
       const body = await readJson(request);
       runtime.runLiveRound1(String(body.problem ?? ''));
       write(response, 200, runtime.snapshot());
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/session/change-coordinator'
+    ) {
+      const body = await readJson(request);
+      runtime.changeCoordinator(String(body.agentId ?? ''));
+      write(response, 200, desktopStatus(runtime, context));
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/session/set-watcher-participation'
+    ) {
+      const body = await readJson(request);
+      runtime.setWatcherParticipation(
+        String(body.agentId ?? ''),
+        body.enabled !== false,
+      );
+      write(response, 200, desktopStatus(runtime, context));
       return true;
     }
     if (

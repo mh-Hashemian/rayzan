@@ -1,20 +1,47 @@
-import type { AgentView, DebateView, RayzanDesktopStatus } from '../api.js';
+import { useState } from 'react';
+
+import type { DebateView, RayzanDesktopStatus } from '../api.js';
 import type { ProductPage } from '../navigation.js';
 import { AgentCard } from './AgentCard.js';
 import { DebateCard } from './DebateCard.js';
 
 export function HomeView(input: {
-  readonly ready: boolean;
-  readonly error?: string;
-  readonly status?: RayzanDesktopStatus;
-  readonly agents: readonly AgentView[];
-  readonly debates: readonly DebateView[];
+  readonly status: RayzanDesktopStatus;
   readonly onNavigate: (page: ProductPage) => void;
-  readonly onRetry: () => void;
+  readonly onChangeCoordinator: (agentId: string) => Promise<void>;
+  readonly onSetWatcherParticipation: (
+    agentId: string,
+    enabled: boolean,
+  ) => Promise<void>;
 }) {
-  const coordinators = input.agents.filter((agent) => agent.role === 'coordinator');
-  const watchers = input.agents.filter((agent) => agent.role === 'watcher');
-  const recent = input.debates.slice(0, 5);
+  const agents = input.status.team;
+  const coordinators = agents.filter((agent) => agent.role === 'coordinator');
+  const watchers = agents.filter((agent) => agent.role === 'watcher');
+  const recent = input.status.debateHistory.slice(0, 5);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState(
+    coordinators[0]?.id ?? '',
+  );
+  const [busy, setBusy] = useState(false);
+  const [pickerError, setPickerError] = useState<string | undefined>();
+
+  async function confirmCoordinator() {
+    if (selectedId.length === 0) {
+      return;
+    }
+    setBusy(true);
+    setPickerError(undefined);
+    try {
+      await input.onChangeCoordinator(selectedId);
+      setPickerOpen(false);
+    } catch (error) {
+      setPickerError(
+        error instanceof Error ? error.message : 'Could not change Coordinator',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <section className="page home">
@@ -26,15 +53,6 @@ export function HomeView(input: {
           </p>
         </div>
       </header>
-
-      {input.error ? (
-        <div className="error-panel">
-          <p>{input.error}</p>
-          <button type="button" className="btn" onClick={input.onRetry}>
-            Retry
-          </button>
-        </div>
-      ) : null}
 
       <div className="cta-row">
         <button
@@ -65,47 +83,50 @@ export function HomeView(input: {
         <header className="block-head">
           <div>
             <h2>Your AI Team</h2>
-            <p>Coordinator first. Watchers second. Provider is secondary to role.</p>
+            <p>Include or exclude Watchers for the next debate.</p>
           </div>
         </header>
 
-        {input.agents.length === 0 ? (
+        {agents.length === 0 ? (
           <p className="empty">
-            {input.ready
-              ? 'No agents restored yet. Register a Coordinator and Watchers from Settings → Debug workspace.'
-              : 'Runtime is not ready, so the team cannot be loaded.'}
+            No agents restored yet. Register a Coordinator and Watchers from
+            Settings → Debug workspace.
           </p>
         ) : (
           <div className="team">
-            <div>
-              <h3 className="team-label">Coordinator</h3>
-              <div className="card-grid">
-                {coordinators.length === 0 ? (
-                  <p className="empty">No coordinator registered.</p>
-                ) : (
-                  coordinators.map((agent) => (
-                    <AgentCard key={agent.id} agent={agent} />
-                  ))
-                )}
-              </div>
+            <div className="team-cards">
+              {coordinators.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  onChangeCoordinator={() => {
+                    setSelectedId(agent.id);
+                    setPickerError(undefined);
+                    setPickerOpen(true);
+                  }}
+                />
+              ))}
+              {watchers.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  onToggleParticipation={(enabled) => {
+                    void input.onSetWatcherParticipation(agent.id, enabled);
+                  }}
+                />
+              ))}
             </div>
-            <div>
-              <h3 className="team-label">Watchers</h3>
-              <div className="card-grid">
-                {watchers.length === 0 ? (
-                  <p className="empty">No watchers registered.</p>
-                ) : (
-                  watchers.map((agent) => (
-                    <AgentCard key={agent.id} agent={agent} />
-                  ))
-                )}
-              </div>
-            </div>
+            {coordinators.length === 0 ? (
+              <p className="empty">No coordinator registered.</p>
+            ) : null}
+            {watchers.length === 0 ? (
+              <p className="empty">No watchers registered.</p>
+            ) : null}
           </div>
         )}
       </section>
 
-      {input.status?.activeDebate ? (
+      {input.status.activeDebate ? (
         <section className="block">
           <h2>Current decision</h2>
           <DebateCard debate={input.status.activeDebate} />
@@ -129,12 +150,80 @@ export function HomeView(input: {
           <p className="empty">No debates yet.</p>
         ) : (
           <div className="debate-list">
-            {recent.map((debate) => (
+            {recent.map((debate: DebateView) => (
               <DebateCard key={debate.id} debate={debate} />
             ))}
           </div>
         )}
       </section>
+
+      {pickerOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-labelledby="coordinator-picker-title"
+          >
+            <h2 id="coordinator-picker-title">Change Coordinator</h2>
+            <p className="lede">
+              This changes who leads future debates. Existing debates keep
+              their original Coordinator.
+            </p>
+            <ul className="picker-list">
+              {agents.map((agent) => (
+                <li key={agent.id}>
+                  <label>
+                    <input
+                      type="radio"
+                      name="coordinator"
+                      checked={selectedId === agent.id}
+                      onChange={() => {
+                        setSelectedId(agent.id);
+                      }}
+                    />
+                    <span>
+                      {agent.name}
+                      <small>
+                        {roleLabel(agent.role)}
+                        {agent.provider ? ` · ${agent.provider}` : ''}
+                      </small>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            {pickerError ? <p className="error-text">{pickerError}</p> : null}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setPickerOpen(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || selectedId.length === 0}
+                onClick={() => {
+                  void confirmCoordinator();
+                }}
+              >
+                Use as Coordinator
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function roleLabel(role: string): string {
+  if (role.length === 0) {
+    return role;
+  }
+  return role[0]!.toUpperCase() + role.slice(1);
 }

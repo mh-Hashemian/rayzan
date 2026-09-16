@@ -6,6 +6,17 @@ export interface DebateView {
   readonly completedAt?: string;
 }
 
+export type AgentConnection = 'connected' | 'disconnected' | 'error';
+
+export interface AgentView {
+  readonly id: string;
+  readonly name: string;
+  readonly role: string;
+  readonly provider?: string;
+  readonly connection: AgentConnection;
+  readonly enabled: boolean;
+}
+
 export interface RayzanDesktopStatus {
   readonly runtime: 'ready';
   readonly database: 'connected' | 'memory';
@@ -17,25 +28,24 @@ export interface RayzanDesktopStatus {
     readonly replayStatus: string;
   };
   readonly agents: number;
+  readonly team: readonly AgentView[];
   readonly browserBridge: 'ready';
   readonly activeDebate: DebateView | null;
   readonly debateHistory: readonly DebateView[];
 }
 
-export interface AgentView {
-  readonly id: string;
-  readonly name: string;
-  readonly role: string;
-  readonly provider?: string;
-  readonly connected: boolean;
-  readonly bindingState?: 'bound' | 'not-bound' | 'unavailable';
-}
-
-export interface RuntimeState {
-  readonly agents: readonly AgentView[];
-}
-
 const ORIGIN = 'http://127.0.0.1:8787';
+
+const STREAM_EVENTS = [
+  'AGENT_REGISTERED',
+  'BINDING_CHANGED',
+  'COORDINATOR_CHANGED',
+  'WATCHER_PARTICIPATION_CHANGED',
+  'DELIVERY_CONFIRMED',
+  'RESPONSE_CAPTURED',
+  'DEBATE_CREATED',
+  'SYNTHESIS_CREATED',
+] as const;
 
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${ORIGIN}${path}`);
@@ -49,56 +59,59 @@ export async function fetchDesktopStatus(): Promise<RayzanDesktopStatus> {
   return getJson<RayzanDesktopStatus>('/api/status');
 }
 
-export async function fetchRegisteredAgents(): Promise<readonly AgentView[]> {
-  const listed = await getJson<
-    readonly { id: string; name: string; role: string }[]
-  >('/api/agents');
-  return listed
-    .filter((agent) => agent.role !== 'operator')
-    .map((agent) => ({
-      id: agent.id,
-      name: agent.name,
-      role: agent.role,
-      connected: false,
-    }));
+export async function changeCoordinator(
+  agentId: string,
+): Promise<RayzanDesktopStatus> {
+  const response = await fetch(`${ORIGIN}/api/session/change-coordinator`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agentId }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    throw new Error(body.error ?? `status ${response.status}`);
+  }
+  return (await response.json()) as RayzanDesktopStatus;
 }
 
-interface StatePayload {
-  readonly agents?: readonly {
-    readonly id: string;
-    readonly name: string;
-    readonly role: string;
-    readonly provider?: string;
-    readonly connected?: boolean;
-  }[];
-  readonly browserBindings?: readonly {
-    readonly agentId: string;
-    readonly provider?: string;
-    readonly state: 'bound' | 'not-bound' | 'unavailable';
-  }[];
-}
-
-export async function fetchRuntimeState(): Promise<RuntimeState> {
-  const payload = await getJson<StatePayload>('/api/state');
-  const bindings = new Map(
-    (payload.browserBindings ?? []).map((binding) => [binding.agentId, binding]),
+export async function setWatcherParticipation(
+  agentId: string,
+  enabled: boolean,
+): Promise<RayzanDesktopStatus> {
+  const response = await fetch(
+    `${ORIGIN}/api/session/set-watcher-participation`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, enabled }),
+    },
   );
-  const agents = (payload.agents ?? [])
-    .filter((agent) => agent.role !== 'operator')
-    .map((agent) => {
-      const binding = bindings.get(agent.id);
-      return {
-        id: agent.id,
-        name: agent.name,
-        role: agent.role,
-        ...(binding?.provider ?? agent.provider
-          ? { provider: binding?.provider ?? agent.provider }
-          : {}),
-        connected: agent.connected === true || binding?.state === 'bound',
-        ...(binding ? { bindingState: binding.state } : {}),
-      };
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+    };
+    throw new Error(body.error ?? `status ${response.status}`);
+  }
+  return (await response.json()) as RayzanDesktopStatus;
+}
+
+export function openRuntimeEventStream(
+  onEvent: () => void,
+): () => void {
+  const source = new EventSource(`${ORIGIN}/api/events/stream`);
+  source.onopen = () => {
+    onEvent();
+  };
+  for (const type of STREAM_EVENTS) {
+    source.addEventListener(type, () => {
+      onEvent();
     });
-  return { agents };
+  }
+  return () => {
+    source.close();
+  };
 }
 
 export function debateTitle(topic: string): string {

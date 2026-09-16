@@ -3,6 +3,7 @@ import { NAV_ITEMS, type ProductPage } from '../navigation.js';
 export function Sidebar(input: {
   readonly page: ProductPage;
   readonly runtimeReady: boolean;
+  readonly connecting: boolean;
   readonly onNavigate: (page: ProductPage) => void;
 }) {
   return (
@@ -46,10 +47,16 @@ export function Sidebar(input: {
 
       <div className="side-footer">
         <span
-          className={input.runtimeReady ? 'dot ok' : 'dot warn'}
+          className={
+            input.connecting ? 'dot' : input.runtimeReady ? 'dot ok' : 'dot warn'
+          }
           aria-hidden="true"
         />
-        {input.runtimeReady ? 'Runtime connected' : 'Runtime stopped'}
+        {input.connecting
+          ? 'Connecting…'
+          : input.runtimeReady
+            ? 'Runtime connected'
+            : 'Runtime stopped'}
       </div>
     </aside>
   );

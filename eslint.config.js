@@ -41,6 +41,8 @@ export default tseslint.config(
         window: 'readonly',
         document: 'readonly',
         HTMLElement: 'readonly',
+        EventSource: 'readonly',
+        fetch: 'readonly',
       },
     },
   },

@@ -205,4 +205,69 @@ describe('test-send bridge path', () => {
     );
     assert.equal(duplicateAck.status, 400);
   });
+
+  it('changes Coordinator for future debates via POST /api/session/change-coordinator', async () => {
+    const base = await started;
+    const before = (await fetch(`${base}/api/status`).then((response) =>
+      response.json(),
+    )) as {
+      team: { id: string; role: string; connection: string }[];
+    };
+    const coordinator = before.team.find((agent) => agent.role === 'coordinator');
+    const watcher = before.team.find((agent) => agent.role === 'watcher');
+    assert.ok(coordinator);
+    assert.ok(watcher);
+    const response = await fetch(`${base}/api/session/change-coordinator`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: watcher.id }),
+    });
+    assert.equal(response.status, 200);
+    const after = (await response.json()) as {
+      team: { id: string; role: string }[];
+    };
+    assert.equal(
+      after.team.find((agent) => agent.id === watcher.id)?.role,
+      'coordinator',
+    );
+    assert.equal(
+      after.team.find((agent) => agent.id === coordinator.id)?.role,
+      'watcher',
+    );
+    assert.equal(
+      after.team.filter((agent) => agent.role === 'coordinator').length,
+      1,
+    );
+  });
+
+  it('streams AGENT_REGISTERED over GET /api/events/stream', async () => {
+    const base = await started;
+    const response = await fetch(`${base}/api/events/stream`);
+    assert.equal(response.ok, true);
+    assert.match(String(response.headers.get('content-type')), /text\/event-stream/);
+    const reader = response.body?.getReader();
+    assert.ok(reader);
+    const decoder = new TextDecoder();
+    const seen = (async () => {
+      let buffer = '';
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          return buffer;
+        }
+        buffer += decoder.decode(chunk.value, { stream: true });
+        if (buffer.includes('event: AGENT_REGISTERED')) {
+          await reader.cancel();
+          return buffer;
+        }
+      }
+    })();
+    await fetch(`${base}/api/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'SSE Watcher', role: 'watcher' }),
+    });
+    const body = await seen;
+    assert.match(body, /event: AGENT_REGISTERED/);
+  });
 });

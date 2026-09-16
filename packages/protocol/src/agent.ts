@@ -27,3 +27,7 @@ export function createAgent(input: {
     role: requireAllowedValue(input.role, AGENT_ROLES, 'agent role'),
   });
 }
+
+export function withAgentRole(agent: Agent, role: AgentRole): Agent {
+  return createAgent({ id: agent.id, name: agent.name, role });
+}

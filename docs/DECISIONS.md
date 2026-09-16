@@ -521,6 +521,26 @@ Rayzan Desktop is an Electron + React + Vite product shell around the existing N
 Reason:
 The Operator should launch Rayzan like an application while the debate engine, event log, and browser-extension bridge stay one runtime.
 
+## DEC-054 — Product home hydrates over REST and listens over SSE; Coordinator can be switched for future debates
+
+Status: Accepted
+
+Decision:
+The Electron product home hydrates once from `GET /api/status` (including a `team` array with explicit `connected` / `disconnected` / `error` states) and then listens to `GET /api/events/stream`. It does not poll. Unknown is a loading screen, not a fake disconnected state. `COORDINATOR_CHANGED` swaps roles for future debates only; historical participant lists stay as recorded. `BINDING_CHANGED` is a live signal and is not reconstructed into browser bindings on replay. Coordinator switching is exposed on the home Coordinator card so the workflow can be validated; it is not a permanent primary home action and later belongs under AI Team / Agent Management. The New Decision wizard is a full workspace page (not a modal) that collects question/context/goal in React state, reuses existing team APIs for Coordinator/Watcher selection, and reviews the plan before any runtime start is connected.
+
+Reason:
+Connection flashing was a hydration race. A desktop app needs confirmed state first, then event-driven updates, without turning the home screen into agent administration. A usable decision workflow needs a staged review before AI contact.
+
+## DEC-055 — Watcher inclusion is roster state for future debates
+
+Status: Accepted
+
+Decision:
+Registered Watchers can be included or excluded from the next debate without unregistering them. `WATCHER_PARTICIPATION_CHANGED` records `{ agentId, enabled, timestamp }`. Replay restores that roster. Existing debate participant lists are not rewritten. The Coordinator cannot be excluded this way. Watcher cards expose an "In next debate" control for workflow validation; later this belongs under AI Team / Agent Management.
+
+Reason:
+The Operator needs to choose which perspectives join a decision without deleting agents or mutating history.
+
 ## DEC-052 — Rayzan preserves debate history and permits at most one active debate
 
 Status: Accepted

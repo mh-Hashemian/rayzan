@@ -32,6 +32,7 @@ describe('desktop status API', () => {
     assert.equal(status.browserBridge, 'ready');
     assert.equal(status.recovery.status, 'fresh');
     assert.equal(status.agents, 0);
+    assert.deepEqual(status.team, []);
     assert.equal(status.activeDebate, null);
     assert.deepEqual(status.debateHistory, []);
   });
@@ -64,6 +65,9 @@ describe('createRayzanServer bootstrap', () => {
       assert.equal(before.database, 'connected');
       assert.equal(before.databasePath, first.databasePath);
       assert.equal(before.agents, 1);
+      assert.equal(before.team.length, 1);
+      assert.equal(before.team[0]?.role, 'coordinator');
+      assert.equal(before.team[0]?.connection, 'disconnected');
       const debug = await fetch(`${base}/debug`);
       assert.equal(debug.status, 200);
       await first.close();

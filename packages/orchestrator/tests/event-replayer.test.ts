@@ -48,6 +48,7 @@ function harness() {
   const messages = new InMemoryMessageStore();
   const exposures = new InMemoryExposureLedgerStore();
   const syntheses = new InMemorySynthesisStore();
+  const participation = new Map<string, boolean>();
   const transport = new BrowserTransport();
   const orchestrator = new Orchestrator(messages, exposures, transport);
   const workflow = new RoundWorkflow(orchestrator, agents, debates, rounds);
@@ -55,6 +56,12 @@ function harness() {
     getAgent: (id) => agents.getById(id as never),
     registerAgent: (agent) => {
       agents.register(agent);
+    },
+    replaceAgent: (agent) => {
+      agents.replace(agent);
+    },
+    setWatcherParticipation: (agentId, enabled) => {
+      participation.set(agentId, enabled);
     },
     getDebate: (id) => debates.getById(id as never),
     createDebate: (debate) => {
@@ -122,6 +129,7 @@ function harness() {
     messages,
     exposures,
     syntheses,
+    participation,
     transport,
     orchestrator,
     workflow,
@@ -475,5 +483,62 @@ describe('EventReplayer', () => {
       target,
     );
     assert.equal(debates.getById(asDebateId('debate-1'))?.status, 'archived');
+  });
+
+  it('replays COORDINATOR_CHANGED by swapping roles without dropping agents', () => {
+    const { agents, target } = harness();
+    new EventReplayer().replay(
+      [
+        event('AGENT_REGISTERED', {
+          id: 'e-op',
+          agentId: 'operator',
+          payload: { id: 'operator', name: 'Operator', role: 'operator' },
+        }),
+        event('AGENT_REGISTERED', {
+          id: 'e-ds',
+          agentId: 'deepseek',
+          payload: { id: 'deepseek', name: 'DeepSeek', role: 'coordinator' },
+        }),
+        event('AGENT_REGISTERED', {
+          id: 'e-qwen',
+          agentId: 'qwen',
+          payload: { id: 'qwen', name: 'Qwen', role: 'watcher' },
+        }),
+        event('COORDINATOR_CHANGED', {
+          id: 'e-swap',
+          payload: { previousAgentId: 'deepseek', newAgentId: 'qwen' },
+        }),
+      ],
+      target,
+    );
+    assert.equal(agents.getById('deepseek' as never)?.role, 'watcher');
+    assert.equal(agents.getById('qwen' as never)?.role, 'coordinator');
+    assert.equal(agents.list().length, 3);
+  });
+
+  it('replays WATCHER_PARTICIPATION_CHANGED without rewriting agents', () => {
+    const { agents, participation, target } = harness();
+    new EventReplayer().replay(
+      [
+        event('AGENT_REGISTERED', {
+          id: 'e-op',
+          agentId: 'operator',
+          payload: { id: 'operator', name: 'Operator', role: 'operator' },
+        }),
+        event('AGENT_REGISTERED', {
+          id: 'e-qwen',
+          agentId: 'qwen',
+          payload: { id: 'qwen', name: 'Qwen', role: 'watcher' },
+        }),
+        event('WATCHER_PARTICIPATION_CHANGED', {
+          id: 'e-off',
+          agentId: 'qwen',
+          payload: { agentId: 'qwen', enabled: false },
+        }),
+      ],
+      target,
+    );
+    assert.equal(agents.getById('qwen' as never)?.role, 'watcher');
+    assert.equal(participation.get('qwen'), false);
   });
 });

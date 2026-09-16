@@ -1,5 +1,6 @@
 export {
   createAgent,
+  withAgentRole,
   AGENT_ROLES,
   type Agent,
   type AgentRole,
