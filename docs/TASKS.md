@@ -63,7 +63,7 @@
 - [x] New Decision wizard (3C.2 Step 2 — UI Steps 1–4 + Start Decision → runtime)
 - [x] Debate workspace / Observatory UI (3C.3 — layout + live progress/agents/synthesis)
 - [x] 3C.3 Acceptance Stabilization (reliable complete debate loop; awaiting Operator validation)
-- [ ] Operator intervention
+- [x] Operator-gated iterative debate loop (3C.4 — checkpoints, Continue, guidance, Finish, dynamic Desktop stages)
 
 ## Later
 

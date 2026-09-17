@@ -39,7 +39,12 @@ The body is what Qwen and GLM will see. You are the sender. In that body you MUS
 2. Tell each Watcher they are an independent Round 1 analyst.
 3. Name each Watcher and their agent id from the list above.
 4. Tell them they must not assume they have seen another Watcher's answer.
-5. Ask for a complete independent analysis.
+5. Ask for a complete independent analysis with these visible sections: interpretation
+   of the problem, material assumptions, multiple viable approaches, analysis of
+   benefits and drawbacks, risks or failure modes, a recommendation, a candidate
+   deliverable, and uncertainties that need resolving.
+6. Tell Watchers to preserve the Operator's requested output and constraints, and
+   to give direct reasoning rather than hidden chain-of-thought or a mechanical log.
 
 {
   "version": 1,
@@ -51,7 +56,7 @@ The body is what Qwen and GLM will see. You are the sender. In that body you MUS
       "roundId": "${input.roundId}",
       "recipients": { "type": "round-watchers" },
       "kind": "brief",
-      "body": "<rephrased problem + Watcher roles + independent-analysis instructions>",
+      "body": "<rephrased problem + deliverable contract + independent-analysis response contract>",
       "referencedMessageIds": []
     }
   ]
@@ -120,9 +125,12 @@ Below are the complete attributed Round 1 materials. Do not summarize them. Do n
 
 Create one personalized Round 2 challenge for each Watcher. Each should:
 - address that Watcher's actual Round 1 reasoning,
-- challenge assumptions / omissions / disagreements,
+- identify shared evidence, the strongest opposing argument, and an unresolved assumption,
+- include a specific question and request a novel analysis or deliverable improvement,
+- apply any relevant Operator intervention,
 - preserve important minority positions,
-- output strict Rayzan JSON only.
+- preserve the original requested deliverable and constraints,
+- output strict Rayzan JSON only, without chain-of-thought or routing metadata.
 
 Rayzan will prepend the common Round 1 evidence packet itself. Your body should be only the personalized challenge for that Watcher.
 
@@ -139,6 +147,105 @@ Return an ordered batch similar to:
   ]
 }
 
+${input.evidencePacket}`;
+}
+
+/** Coordinator prompt for every post-Round-1 challenge round. */
+export function coordinatorRoundPrompt(input: {
+  problem: string;
+  coordinatorId: string;
+  debateId: string;
+  roundId: string;
+  roundNumber: number;
+  watchers: readonly Agent[];
+  evidencePacket: string;
+  latestCheckpoint?: string;
+  intervention?: string;
+}): string {
+  const watcherLines = input.watchers
+    .map((watcher) => `- ${watcher.name} (id ${watcher.id})`)
+    .join('\n');
+  const commands = input.watchers
+    .map(
+      (watcher) => `{
+      "type": "dispatch",
+      "messageId": "round${input.roundNumber}-${watcher.id}",
+      "debateId": "${input.debateId}",
+      "roundId": "${input.roundId}",
+      "recipients": { "type": "explicit-agents", "agentIds": ["${watcher.id}"] },
+      "kind": "query",
+      "body": "<${watcher.name}-specific challenge>",
+      "referencedMessageIds": []
+    }`,
+    )
+    .join(',\n    ');
+  return `You are the Rayzan Coordinator for debate ${input.debateId}.
+
+Create Round ${input.roundNumber} challenges for every active Watcher. Round 1 was independent; this round must produce fresh substantive analysis, not a restatement of prior answers. Preserve important disagreement and the Operator Deliverable Contract: the original goal, requested artifact/output, and every stated constraint.
+
+Each personalized challenge body must explicitly include:
+- the relevant shared evidence and the Watcher's current position or meaningful change;
+- the strongest opposing argument or evidence the Watcher must answer;
+- an unresolved assumption or uncertainty to test;
+- any Operator intervention that applies;
+- at least one specific question for that Watcher; and
+- a request for a new analysis, comparison, test, design move, or other novel contribution.
+
+Do not include dispatch metadata, routing logs, or chain-of-thought in a challenge body. The platform will provide semantic evidence separately.
+
+Watchers:
+${watcherLines}
+
+${input.latestCheckpoint ? `Latest Coordinator checkpoint:\n${input.latestCheckpoint}\n` : ''}${input.intervention ? `Operator intervention (apply exactly as relevant):\n${input.intervention}\n` : ''}
+Reply with JSON only, using exactly one dispatch command per Watcher:
+{
+  "version": 1,
+  "commands": [
+    ${commands}
+  ]
+}
+
+Evidence packet (bounded to relevant prior evidence):
+${input.evidencePacket}
+
+Original problem:
+${input.problem}`;
+}
+
+export function coordinatorCheckpointPrompt(input: {
+  coordinatorId: string;
+  debateId: string;
+  roundId: string;
+  roundNumber: number;
+  evidencePacket: string;
+}): string {
+  return `You are the Rayzan Coordinator for debate ${input.debateId}.
+
+Round ${input.roundNumber} (${input.roundId}) is complete. Do not dispatch Watchers and do not write JSON commands. Produce a substantial, self-contained operator report in Markdown. It must be useful without opening any Watcher message, while avoiding a mechanical transcript or hidden chain-of-thought.
+
+Preserve the Operator Deliverable Contract throughout: state the goal, identify the actual requested output/artifact, and retain every stated output constraint. Include the fullest usable candidate artifact that the evidence supports; do not replace it with a vague promise.
+
+Use exactly these headings, in this order:
+
+# Coordinator's Current Judgment
+# Requested Deliverable
+# What Happened This Round
+# Ideas Compared
+# Challenges and Responses
+# Position Changes
+# Remaining Disagreements
+# Important Terms
+# What Changed Since Last Round
+# Coordinator Recommendation
+
+Under Ideas Compared, include a Markdown comparison table whenever two or more approaches can reasonably be compared. Explain terms or context needed by a non-specialist under Important Terms. Identify direct challenges, responses, tradeoffs, evidence, and position changes rather than merely listing messages.
+
+Under # Coordinator Recommendation, include this exact machine-readable line followed by a reason and, for CONTINUE, a concrete next-round agenda:
+Coordinator recommendation: FINISH | CONTINUE
+
+The Current Judgment is provisional at a checkpoint. The Operator, not you, decides whether to continue.
+
+Relevant evidence:
 ${input.evidencePacket}`;
 }
 
@@ -199,31 +306,27 @@ Your role = coordinator
 Your agent ID = ${input.coordinatorId}
 Debate ID = ${input.debateId}
 
-Round 1 and Round 2 are complete. This is the final synthesis stage, not a new debate round.
+All completed debate rounds are available below. This is the final synthesis stage, not a new debate round.
 
 Do not emit JSON commands. Do not dispatch Watchers. Do not start Round 3.
 The Operator decides. You recommend.
 
-Write one complete report the Operator can read without opening any Watcher message.
+Write one complete, self-contained final report the Operator can use without opening any Watcher message. Preserve the Operator Deliverable Contract: goal, requested output/artifact, and every output constraint. Include the fullest usable final artifact supported by the evidence.
 
-Use exactly these headings:
+Use exactly these headings, in this order:
 
-Problem:
-Process:
-Consensus:
-Differences:
-Rejected ideas:
-Final recommendation:
-Confidence:
-Suggested next action:
+# Coordinator's Final Judgment
+# Requested Deliverable
+# Debate Summary
+# Ideas Compared
+# Challenges and Responses
+# Position Changes
+# Remaining Disagreements
+# Important Terms
+# What Changed Across Rounds
+# Final Recommendation
 
-Under Process, include numbered steps covering:
-1. Independent Round 1 analyses
-2. What each Watcher initially proposed
-3. Important arguments from each side
-4. Main disagreements
-5. What Round 2 critique changed or revealed
-6. Points still uncertain
+Under Ideas Compared, include a Markdown comparison table whenever applicable. Cover the independent analyses, the meaningful challenges and responses, tradeoffs, unresolved uncertainty, and why the recommendation follows. Do not include routing metadata, a mechanical transcript, or hidden chain-of-thought.
 
 ${input.evidencePacket}`;
 }

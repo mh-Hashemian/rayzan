@@ -54,6 +54,7 @@ export const MOCK_DEBATE_VIEW: DebateWorkspaceView = {
       summary: 'Waiting for Round 2 Watcher responses',
       phasesDone: 3,
       phasesTotal: 5,
+      rounds: [],
     },
     {
       id: 'qwen',
@@ -62,10 +63,12 @@ export const MOCK_DEBATE_VIEW: DebateWorkspaceView = {
       provider: 'Qwen',
       status: 'Responded',
       summary: 'Round 2 response received / Analyzing position',
-      phasesDone: 3,
-      phasesTotal: 5,
-      round1: 'Completed',
-      round2: 'Completed',
+      phasesDone: 2,
+      phasesTotal: 2,
+      rounds: [
+        { number: 1, status: 'Completed' },
+        { number: 2, status: 'Completed' },
+      ],
     },
     {
       id: 'glm',
@@ -74,10 +77,12 @@ export const MOCK_DEBATE_VIEW: DebateWorkspaceView = {
       provider: 'GLM',
       status: 'Responded',
       summary: 'Round 2 response received / Analyzing position',
-      phasesDone: 3,
-      phasesTotal: 5,
-      round1: 'Completed',
-      round2: 'Completed',
+      phasesDone: 2,
+      phasesTotal: 2,
+      rounds: [
+        { number: 1, status: 'Completed' },
+        { number: 2, status: 'Completed' },
+      ],
     },
   ],
   timeline: [
@@ -122,6 +127,7 @@ export const MOCK_DEBATE_VIEW: DebateWorkspaceView = {
     disagreement: [],
     risks: [],
   },
+  awaitingOperator: false,
   transcript: [
     {
       id: 't1',

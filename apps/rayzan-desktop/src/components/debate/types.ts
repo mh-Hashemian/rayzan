@@ -6,12 +6,24 @@ export type DebateBadgeStatus =
   | 'Synthesizing'
   | 'Completed';
 
+export interface CoordinatorCheckpointView {
+  readonly roundNumber: number;
+  readonly body: string;
+  readonly recommendation: 'finish' | 'continue';
+}
+
 export type AgentPhaseStatus =
   | 'Active'
   | 'Thinking'
   | 'Responded'
   | 'Waiting'
+  | 'Awaiting Operator'
   | 'Completed';
+
+export interface AgentRoundProgress {
+  readonly number: number;
+  readonly status: string;
+}
 
 export interface ProgressStage {
   readonly id: string;
@@ -35,8 +47,7 @@ export interface AgentProgress {
   readonly summary: string;
   readonly phasesDone: number;
   readonly phasesTotal: number;
-  readonly round1?: string;
-  readonly round2?: string;
+  readonly rounds: readonly AgentRoundProgress[];
 }
 
 export interface TimelineItem {
@@ -73,6 +84,8 @@ export interface DebateWorkspaceView {
   readonly insights: InsightsView;
   readonly transcript: readonly TranscriptMessage[];
   readonly synthesis?: string;
+  readonly checkpoint?: CoordinatorCheckpointView;
+  readonly awaitingOperator: boolean;
   readonly lastError?: string;
   readonly canRetryCoordinatorDispatch?: boolean;
 }

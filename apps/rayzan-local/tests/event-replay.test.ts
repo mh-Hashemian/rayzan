@@ -66,6 +66,14 @@ function runCompletedDebate(runtime: RayzanRuntime) {
   runtime.acknowledgeDelivery(glm.id, glmR1.deliveryId);
   runtime.submitCapturedResponse(qwen.id, qwenR1.deliveryId, 'Qwen: SQLite.');
   runtime.submitCapturedResponse(glm.id, glmR1.deliveryId, 'GLM: PostgreSQL.');
+  const checkpoint1 = runtime.nextPendingForAgent(coordinator.id)!;
+  runtime.acknowledgeDelivery(coordinator.id, checkpoint1.deliveryId);
+  runtime.submitCapturedResponse(
+    coordinator.id,
+    checkpoint1.deliveryId,
+    'Coordinator recommendation: CONTINUE\nReason: compare trade-offs.',
+  );
+  runtime.continueDebate();
   const afterRound1 = runtime.snapshot();
   const coordinatorPlanJob = runtime.nextPendingForAgent(coordinator.id)!;
   runtime.acknowledgeDelivery(coordinator.id, coordinatorPlanJob.deliveryId);
@@ -118,6 +126,14 @@ function runCompletedDebate(runtime: RayzanRuntime) {
     glmR2.deliveryId,
     'GLM Round 2: PostgreSQL still, managed.',
   );
+  const checkpoint2 = runtime.nextPendingForAgent(coordinator.id)!;
+  runtime.acknowledgeDelivery(coordinator.id, checkpoint2.deliveryId);
+  runtime.submitCapturedResponse(
+    coordinator.id,
+    checkpoint2.deliveryId,
+    'Coordinator recommendation: FINISH\nReason: enough evidence.',
+  );
+  runtime.finishDebate();
   const synthesisJob = runtime.nextPendingForAgent(coordinator.id)!;
   runtime.acknowledgeDelivery(coordinator.id, synthesisJob.deliveryId);
   const report = `Final recommendation:

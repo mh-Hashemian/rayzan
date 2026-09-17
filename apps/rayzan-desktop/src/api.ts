@@ -49,6 +49,20 @@ export interface RuntimeDebateState {
     readonly number: number;
     readonly status: string;
   };
+  readonly rounds: readonly {
+    readonly id: string;
+    readonly number: number;
+    readonly status: string;
+  }[];
+  readonly checkpoint?: {
+    readonly debateId: string;
+    readonly roundId: string;
+    readonly roundNumber: number;
+    readonly body: string;
+    readonly recommendation: 'finish' | 'continue';
+    readonly createdAt: string;
+  };
+  readonly awaitingOperator: boolean;
   readonly agents: readonly {
     readonly id: string;
     readonly name: string;
@@ -56,7 +70,11 @@ export interface RuntimeDebateState {
     readonly provider?: string;
     readonly phase?: string;
     readonly round1Status: string;
-    readonly round2Status: string;
+  readonly round2Status: string;
+  readonly roundStatuses: readonly {
+    readonly number: number;
+    readonly status: string;
+  }[];
     readonly enabled: boolean;
   }[];
   readonly messages?: readonly {
@@ -72,6 +90,7 @@ export interface RuntimeDebateState {
     readonly body: string;
     readonly createdAt: string;
   };
+  readonly synthesisPending: boolean;
   readonly lastError?: string;
   readonly canRetryCoordinatorDispatch?: boolean;
 }
@@ -93,6 +112,10 @@ const STREAM_EVENTS = [
   'DEBATE_CREATED',
   'ROUND_CREATED',
   'ROUND_COMPLETED',
+  'COORDINATOR_CHECKPOINT_CREATED',
+  'OPERATOR_INTERVENTION',
+  'DEBATE_CONTINUED',
+  'DEBATE_FINISH_REQUESTED',
   'SYNTHESIS_CREATED',
 ] as const;
 
@@ -143,6 +166,32 @@ export async function retryCoordinatorDispatch(): Promise<RuntimeDebateState> {
       error?: string;
     };
     throw new Error(body.error ?? `status ${response.status}`);
+  }
+  return (await response.json()) as RuntimeDebateState;
+}
+
+export async function continueDebate(
+  guidance?: string,
+): Promise<RuntimeDebateState> {
+  return postRuntime('/api/session/continue-debate', { guidance });
+}
+
+export async function finishDebate(): Promise<RuntimeDebateState> {
+  return postRuntime('/api/session/finish-debate', {});
+}
+
+async function postRuntime(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<RuntimeDebateState> {
+  const response = await fetch(`${ORIGIN}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(error.error ?? `status ${response.status}`);
   }
   return (await response.json()) as RuntimeDebateState;
 }

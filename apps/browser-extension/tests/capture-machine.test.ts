@@ -347,4 +347,51 @@ describe('capture state machine', () => {
     assert.equal(evaluation.phase, 'failed');
     assert.equal(evaluation.failure, 'new-turn-timeout');
   });
+
+  it('holds capture while assistant text looks like incomplete JSON', () => {
+    const partial = turnFrom('<div>{</div>', {
+      identity: 'idx:1',
+      finalText: '{',
+    });
+    const snapshot: CaptureSnapshot = {
+      identities: [],
+      assistantTurnCount: 0,
+      lastIncomplete: false,
+    };
+    const early = evaluateCapture({
+      snapshot,
+      observation: { turns: [partial], generating: false },
+      state: {
+        ...initialCaptureState(0),
+        trackedIdentity: 'idx:1',
+        lastText: '{',
+        lastChangeAt: 0,
+      },
+      now: 5_000,
+      stabilityWindowMs: 2_000,
+    });
+    assert.equal(early.phase, 'generating');
+    assert.equal(early.failure, undefined);
+
+    const completeText =
+      '{"version":1,"commands":[{"type":"dispatch","messageId":"x","debateId":"d","recipients":{"type":"round-watchers"},"kind":"brief","body":"hi","referencedMessageIds":[]}]}';
+    const complete = turnFrom('<div>done</div>', {
+      identity: 'idx:1',
+      finalText: completeText,
+    });
+    const done = evaluateCapture({
+      snapshot,
+      observation: { turns: [complete], generating: false },
+      state: {
+        ...initialCaptureState(0),
+        trackedIdentity: 'idx:1',
+        lastText: completeText,
+        lastChangeAt: 0,
+      },
+      now: 5_000,
+      stabilityWindowMs: 2_000,
+    });
+    assert.equal(done.phase, 'captured');
+    assert.equal(done.text, completeText);
+  });
 });

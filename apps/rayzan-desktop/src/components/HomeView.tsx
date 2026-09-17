@@ -4,6 +4,7 @@ import type { DebateView, RayzanDesktopStatus } from '../api.js';
 import type { ProductPage } from '../navigation.js';
 import { AgentCard } from './AgentCard.js';
 import { DebateCard } from './DebateCard.js';
+import rayzanLogo from '../assets/branding/rayzan-logo-tagline-navy.png';
 
 export function HomeView(input: {
   readonly status: RayzanDesktopStatus;
@@ -52,6 +53,12 @@ export function HomeView(input: {
             Orchestrate multiple AI perspectives. Make better decisions.
           </p>
         </div>
+        <img
+          className="hero-logo"
+          src={rayzanLogo}
+          alt="Rayzan — From many perspectives."
+          draggable={false}
+        />
       </header>
 
       <div className="cta-row">

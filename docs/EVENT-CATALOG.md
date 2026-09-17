@@ -32,7 +32,8 @@ External side effects use request → terminal (`confirmed` or `failed`). A `REQ
 | `RESPONSE_CAPTURED` | Capture succeeded | 1 | `messageId`, `deliveryId`, `senderId` | response `MESSAGE_CREATED` | `delivery:{id}` | set status responded | **yes** (terminal) |
 | `CAPTURE_FAILED` | Capture failed | 1 | `deliveryId`, `recipientId`, `action: capture`, `reason` | `CAPTURE_REQUESTED` | `delivery:{id}` | none; not retried | **yes** (terminal) |
 | `ROUND_COMPLETED` | Close a round | 1 | `number`, `status` | last `RESPONSE_CAPTURED` in that round | `round:{id}` | restore completed | no |
+| `COORDINATOR_CHECKPOINT_CREATED` | Store Coordinator's post-round assessment | 1 | `body`, `recommendation: finish\|continue`, `createdAt` | `ROUND_COMPLETED` | `round:{id}` | restore checkpoint artifact | no |
+| `OPERATOR_INTERVENTION` | Preserve free-form guidance for the next round | 1 | `guidance` | checkpoint | `round:{id}` | retained in event history | no |
+| `DEBATE_CONTINUED` | Authorize one more round | 1 | `fromRoundId` | checkpoint | `round:{id}` | gate derivation | no |
+| `DEBATE_FINISH_REQUESTED` | Authorize final synthesis | 1 | `roundId` | checkpoint | `debate:{id}` | gate derivation | no |
 | `SYNTHESIS_CREATED` | Store Coordinator report | 1 | `coordinatorId`, `body`, `createdAt` | last `ROUND_COMPLETED` | `debate:{id}` | store synthesis; complete debate | no |
-| `OPERATOR_INTERVENTION` | Reserved | 1 | unspecified | unspecified | unspecified | skipped (unsupported) | no |
-
-`OPERATOR_INTERVENTION` remains reserved. Intervention behavior is not implemented.

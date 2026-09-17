@@ -57,6 +57,10 @@
       {
         "from": "../rayzan-local/public",
         "to": "local-public"
+      },
+      {
+        "from": "resources/rayzan-app-icon.ico",
+        "to": "rayzan-app-icon.ico"
       }
     ],
     "npmRebuild": false,
@@ -64,8 +68,13 @@
     "electronVersion": "32.2.8",
     "forceCodeSigning": false,
     "win": {
+      "icon": "resources/rayzan-app-icon.ico",
       "signAndEditExecutable": false,
       "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
         {
           "target": "dir",
           "arch": ["x64"]

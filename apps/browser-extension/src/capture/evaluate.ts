@@ -8,6 +8,7 @@ import {
   type CaptureFailureReason,
   type AssistantTurn,
 } from './types.js';
+import { looksLikeIncompleteJson } from './incomplete-json.js';
 import { resolveTrackedTurn } from './turns.js';
 
 export interface CaptureMachineState {
@@ -134,6 +135,21 @@ export function evaluateCapture(input: {
   const text = tracked.finalText;
   if (text.length === 0) {
     return fail(input, 'empty-response', true, tracked);
+  }
+  // Providers often stream the opening `{` of Coordinator JSON before the rest.
+  // Their stop/generating UI can clear early; do not capture until JSON parses.
+  if (looksLikeIncompleteJson(text)) {
+    if (input.now - input.state.startedAt >= generationTimeoutMs) {
+      return fail(input, 'generation-timeout', true, tracked);
+    }
+    return {
+      phase: 'generating',
+      tracked,
+      lastText: text,
+      lastChangeAt:
+        text === input.state.lastText ? input.state.lastChangeAt : input.now,
+      trackedConnected: tracked.element.isConnected,
+    };
   }
   const lastChangeAt =
     text === input.state.lastText ? input.state.lastChangeAt : input.now;

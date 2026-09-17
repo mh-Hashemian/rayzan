@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 import {
   fetchRuntimeState,
+  continueDebate,
+  finishDebate,
   retryCoordinatorDispatch,
   type RuntimeDebateState,
 } from '../../api.js';
@@ -32,6 +34,8 @@ export function DebateWorkspace(input: {
   const [loadError, setLoadError] = useState<string | undefined>();
   const [retryBusy, setRetryBusy] = useState(false);
   const [showReport, setShowReport] = useState(false);
+  const [guidance, setGuidance] = useState('');
+  const [gateBusy, setGateBusy] = useState(false);
 
   useEffect(() => {
     if (input.useMock) {
@@ -108,6 +112,7 @@ export function DebateWorkspace(input: {
           timeline: [],
           transcript: [],
           insights: { agreement: [], disagreement: [], risks: [] },
+          awaitingOperator: false,
         };
 
   const complete = view.badge === 'Completed' && view.synthesis !== undefined;
@@ -122,6 +127,24 @@ export function DebateWorkspace(input: {
       setLoadError(error instanceof Error ? error.message : 'Retry failed');
     } finally {
       setRetryBusy(false);
+    }
+  }
+
+  async function actAtGate(action: 'continue' | 'finish') {
+    setGateBusy(true);
+    try {
+      const next =
+        action === 'finish'
+          ? await finishDebate()
+          : await continueDebate(guidance.trim() || undefined);
+      setState(next);
+      if (action === 'continue') {
+        setGuidance('');
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not update debate');
+    } finally {
+      setGateBusy(false);
     }
   }
 
@@ -235,6 +258,34 @@ export function DebateWorkspace(input: {
             details={view.details}
             nextAction={view.nextAction}
           />
+
+          {view.awaitingOperator && view.checkpoint ? (
+            <section className="operator-gate card-panel" aria-label="Operator decision gate">
+              <p className="obs-eyebrow">Round {view.checkpoint.roundNumber} Complete</p>
+              <h2>Awaiting Operator</h2>
+              <p className="gate-recommendation">
+                Coordinator recommends: <strong>{view.checkpoint.recommendation.toUpperCase()}</strong>
+              </p>
+              <pre className="obs-report">{view.checkpoint.body}</pre>
+              <label className="gate-guidance">
+                Guidance for next round (optional)
+                <textarea
+                  value={guidance}
+                  disabled={gateBusy}
+                  onChange={(event) => setGuidance(event.target.value)}
+                  placeholder="Assume we only have one DevOps engineer…"
+                />
+              </label>
+              <div className="wizard-actions">
+                <button type="button" className="btn" disabled={gateBusy} onClick={() => void actAtGate('finish')}>
+                  Finish Decision
+                </button>
+                <button type="button" className="btn primary" disabled={gateBusy} onClick={() => void actAtGate('continue')}>
+                  {guidance.trim() ? 'Add Guidance + Continue' : 'Continue'}
+                </button>
+              </div>
+            </section>
+          ) : null}
 
           <section className="obs-team">
             <header className="obs-section-head">

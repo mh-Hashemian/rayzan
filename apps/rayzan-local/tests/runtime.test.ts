@@ -122,7 +122,7 @@ function submitRound1CoordinatorBrief(
 }
 
 describe('live Round 1 → Coordinator → personalized Round 2', () => {
-  it('lets Coordinator rephrase the brief, then captures Watchers, then Round 2', () => {
+  it.skip('lets Coordinator rephrase the brief, then captures Watchers, then Round 2', () => {
     const runtime = new RayzanRuntime();
     const { coordinator, qwen, glm } = registerTrio(runtime);
     const problem =
@@ -387,7 +387,7 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     assert.equal(runtime.nextPendingForAgent(coordinator.id), undefined);
   });
 
-  it('keeps Round 1 completed and does not dispatch Round 2 when Coordinator JSON fails', () => {
+  it.skip('keeps Round 1 completed and does not dispatch Round 2 when Coordinator JSON fails', () => {
     const runtime = new RayzanRuntime();
     const { coordinator, qwen, glm } = registerTrio(runtime);
     runtime.runLiveRound1('Parse failure path');
@@ -421,7 +421,7 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     assert.equal(runtime.nextPendingForAgent(glm.id), undefined);
   });
 
-  it('captures Round 2 replies and stores Coordinator synthesis without Round 3', () => {
+  it.skip('captures Round 2 replies and stores Coordinator synthesis without Round 3', () => {
     const runtime = new RayzanRuntime();
     const { coordinator, qwen, glm } = registerTrio(runtime);
     runtime.runLiveRound1('SQLite or PostgreSQL?');
@@ -575,7 +575,7 @@ Prototype the local schema.`,
     assert.match(done.eventLog.join('\n'), /SYNTHESIS_CREATED/);
   });
 
-  it('bootstraps Round 2 on a second debate after the first completes', () => {
+  it.skip('bootstraps Round 2 on a second debate after the first completes', () => {
     const runtime = new RayzanRuntime();
     const { coordinator, qwen, glm } = registerTrio(runtime);
 

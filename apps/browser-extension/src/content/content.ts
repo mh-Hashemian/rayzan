@@ -30,6 +30,7 @@ const capturedDeliveryIds = new Set<string>();
 const snapshots = new Map<string, CaptureSnapshot>();
 let blockedSendId: string | undefined;
 let sendInFlight: string | undefined;
+let pollInFlight = false;
 
 async function bindingForThisTab(): Promise<Binding | undefined> {
   return chrome.runtime.sendMessage({ type: 'get-binding' }) as Promise<
@@ -255,6 +256,26 @@ async function runCaptureJob(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // Another frame/job may have posted first (content scripts run in all
+      // frames). Treat idempotent success as captured, not a fatal error.
+      if (/response already submitted for delivery/i.test(message)) {
+        capturedDeliveryIds.add(deliveryId);
+        const report: CaptureReport = {
+          deliveryId,
+          agentId: binding.agentId,
+          provider,
+          phase: 'captured',
+          promptSubmitted: true,
+          preSendTurnCount: snapshot.assistantTurnCount,
+          currentTurnCount: adapter.listAssistantTurns().length,
+          textLength: text.length,
+          posted: true,
+        };
+        jobs.finish(deliveryId, 'captured', report);
+        await reportPresence(binding, { phase: 'captured', capture: report });
+        await chrome.runtime.sendMessage({ type: 'adapter-error', message: '' });
+        return;
+      }
       const report: CaptureReport = {
         deliveryId,
         agentId: binding.agentId,
@@ -326,6 +347,11 @@ async function processPending(binding: Binding): Promise<void> {
     `/api/deliveries/pending?agentId=${encodeURIComponent(binding.agentId)}`,
   );
   if (pending.job === null) {
+    return;
+  }
+  // Another wake/poll can complete while the bridge request is in flight.
+  // Re-check after the await so one delivery has one submit owner.
+  if (sendInFlight !== undefined) {
     return;
   }
   const deliveryId = pending.job.deliveryId;
@@ -494,6 +520,10 @@ async function manualCapture(binding: Binding): Promise<void> {
 }
 
 async function poll(): Promise<void> {
+  if (pollInFlight) {
+    return;
+  }
+  pollInFlight = true;
   try {
     if (window !== window.top && !isCaptureFrame()) {
       return;
@@ -528,6 +558,8 @@ async function poll(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await chrome.runtime.sendMessage({ type: 'adapter-error', message });
+  } finally {
+    pollInFlight = false;
   }
 }
 

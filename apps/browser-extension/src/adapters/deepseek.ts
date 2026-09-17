@@ -15,6 +15,7 @@ import type {
   PromptSendResult,
 } from './types.js';
 import type { AssistantTurn } from '../capture/types.js';
+import { looksLikeIncompleteJson } from '../capture/incomplete-json.js';
 import { liveSnapshotFromTurns, turnIdentity } from '../capture/turns.js';
 
 export function deepSeekAssistantTurns(root?: ParentNode): Element[] {
@@ -28,9 +29,20 @@ export function deepSeekAssistantTurns(root?: ParentNode): Element[] {
 
 export function deepSeekIsGenerating(root?: ParentNode): boolean {
   const last = deepSeekAssistantTurns(root).at(-1);
-  const hasMain = last?.querySelector('.ds-assistant-message-main-content');
-  const thinking = last?.querySelector('.ds-think-content');
-  return Boolean(thinking && !hasMain);
+  if (last === undefined) {
+    return false;
+  }
+  const hasMain = last.querySelector('.ds-assistant-message-main-content');
+  const thinking = last.querySelector('.ds-think-content');
+  if (thinking && !hasMain) {
+    return true;
+  }
+  // DeepSeek clears thinking as soon as the first answer token appears, so a
+  // paused stream of `{` looks "done" without this check.
+  if (hasMain && looksLikeIncompleteJson(visibleText(hasMain))) {
+    return true;
+  }
+  return false;
 }
 
 export function deepSeekExtract(turn: Element | undefined): string {

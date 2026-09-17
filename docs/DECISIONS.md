@@ -541,6 +541,16 @@ Registered Watchers can be included or excluded from the next debate without unr
 Reason:
 The Operator needs to choose which perspectives join a decision without deleting agents or mutating history.
 
+## DEC-056 — Debate execution is operator-gated and iteratively extensible
+
+Status: Accepted
+
+Decision:
+After every mechanically completed round, the Coordinator creates a concise checkpoint with a recommendation to `FINISH` or `CONTINUE`. The Operator authorizes `Continue`, `Add Guidance + Continue`, or `Finish Decision` in the Desktop Debate Workspace. Round 1 remains independently isolated; later rounds use shared evidence and Coordinator-directed challenges for every active Watcher. Final synthesis occurs only after explicit `DEBATE_FINISH_REQUESTED`.
+
+Reason:
+Coordinator recommendations are semantic input, not autonomous authorization. The Operator owns the stop/continue decision and recovery must restore a checkpoint gate without resending browser work.
+
 ## DEC-052 — Rayzan preserves debate history and permits at most one active debate
 
 Status: Accepted
@@ -560,5 +570,4 @@ Decision:
 
 Reason:
 The Operator needs a product-shaped window to judge direction before the wizard, workspace, and Observatory are built.
-
 

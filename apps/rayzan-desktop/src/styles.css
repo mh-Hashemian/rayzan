@@ -63,30 +63,19 @@ textarea {
 
 .brand {
   display: flex;
-  gap: 0.75rem;
   align-items: center;
-  margin: 0.25rem 0.5rem 1.65rem;
+  justify-content: center;
+  min-height: 86px;
+  margin: 0.25rem 0.5rem 1.7rem;
   flex-shrink: 0;
 }
 
-.brand-mark {
-  color: #dce7f2;
-}
-
-.brand-name {
-  margin: 0;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  font-size: 0.9rem;
-  font-weight: 800;
-  color: #fff;
-  font-family: var(--font-ui);
-}
-
-.brand-tag {
-  margin: 0.2rem 0 0;
-  font-size: 0.74rem;
-  color: var(--sidebar-muted);
+.brand-logo {
+  display: block;
+  width: min(100%, 196px);
+  height: auto;
+  object-fit: contain;
+  object-position: left center;
 }
 
 .side-nav {
@@ -217,8 +206,16 @@ textarea {
 .hero {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 1.5rem;
   margin-bottom: 1.5rem;
+}
+
+.hero-logo {
+  width: min(250px, 31vw);
+  height: auto;
+  object-fit: contain;
+  flex: 0 1 250px;
 }
 
 h1 {
@@ -1227,7 +1224,7 @@ h2 {
 
 .obs-agent-rounds {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(5.8rem, 1fr));
   gap: 0.5rem;
   margin: 0 0 0.65rem;
 }
@@ -1451,6 +1448,36 @@ h2 {
   margin-top: 0.5rem;
 }
 
+.operator-gate {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--line));
+}
+
+.operator-gate h2 {
+  margin: 0.2rem 0 0.55rem;
+}
+
+.gate-recommendation {
+  margin: 0 0 0.8rem;
+  color: var(--primary);
+}
+
+.gate-guidance {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.gate-guidance textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+  font: inherit;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
 .obs-final h2 {
   margin: 0.35rem 0 0.85rem;
 }
@@ -1473,4 +1500,3 @@ h2 {
     flex-direction: column;
   }
 }
-

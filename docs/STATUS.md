@@ -33,8 +33,8 @@ Completed:
 
 Currently being worked on:
 
-- None (waiting for Operator validation of Debate Workspace watching loop)
+- 3C.4 Operator-Gated Iterative Debate Loop — waiting for Operator validation in Rayzan Desktop
 
 Next:
 
-- Observatory refinements / Operator intervention (only after Operator accepts 3C.3)
+- Validate Continue → Round N → checkpoint → Finish in the Desktop workspace

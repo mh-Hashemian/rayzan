@@ -4,6 +4,7 @@ export {
   CaptureError,
 } from './evaluate.js';
 export type { CaptureEvaluation, CaptureMachineState } from './evaluate.js';
+export { looksLikeIncompleteJson } from './incomplete-json.js';
 export { runCapture } from './run.js';
 export { CaptureJobRegistry, isActiveCapturePhase } from './jobs.js';
 export {

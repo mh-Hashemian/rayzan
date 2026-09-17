@@ -8,6 +8,7 @@ import {
   withAgentRole,
   createDebate,
   createDebateSynthesis,
+  createCoordinatorCheckpoint,
   createExposureRecord,
   createMessageEnvelope,
   createRound,
@@ -19,6 +20,7 @@ import {
   type Debate,
   type DebateStatus,
   type DebateSynthesis,
+  type CoordinatorCheckpoint,
   type ExposureRecord,
   type MessageEnvelope,
   type MessageKind,
@@ -86,6 +88,8 @@ export interface ReplayTarget {
   recordExposure(record: ExposureRecord): void;
   getSynthesis(debateId: string): DebateSynthesis | undefined;
   storeSynthesis(synthesis: DebateSynthesis): void;
+  getCheckpoint?(roundId: string): CoordinatorCheckpoint | undefined;
+  storeCheckpoint?(checkpoint: CoordinatorCheckpoint): void;
   hydrateMessage(message: MessageEnvelope): void;
   hydrateDelivery(delivery: OutboundDelivery): void;
   getDelivery(id: string): OutboundDelivery | undefined;
@@ -276,6 +280,8 @@ export class EventReplayer {
           return this.#exposureCreated(event, target);
         case 'ROUND_COMPLETED':
           return this.#roundCompleted(event, target);
+        case 'COORDINATOR_CHECKPOINT_CREATED':
+          return this.#checkpointCreated(event, target);
         case 'SYNTHESIS_CREATED':
           return this.#synthesisCreated(event, target);
         case 'PROMPT_DISPATCH_REQUESTED':
@@ -285,10 +291,10 @@ export class EventReplayer {
         case 'CAPTURE_FAILED':
           return { kind: 'applied' };
         case 'OPERATOR_INTERVENTION':
+        case 'DEBATE_CONTINUED':
+        case 'DEBATE_FINISH_REQUESTED':
           return {
-            kind: 'skipped',
-            code: 'unsupported',
-            message: 'OPERATOR_INTERVENTION is reserved and not replayed',
+            kind: 'applied',
           };
         default:
           return {
@@ -615,6 +621,45 @@ export class EventReplayer {
       return integrity(`ROUND_COMPLETED references unknown round: ${roundId}`);
     }
     target.restoreRoundCompleted(roundId);
+    return { kind: 'applied' };
+  }
+
+  #checkpointCreated(event: Event, target: ReplayTarget): ApplyOutcome {
+    const payload = asPayload(event.payload);
+    const debateId = event.debateId;
+    const roundId = event.roundId;
+    const body = stringField(payload, 'body');
+    const recommendation = stringField(payload, 'recommendation');
+    const createdAt = stringField(payload, 'createdAt');
+    if (
+      debateId === undefined ||
+      roundId === undefined ||
+      body === undefined ||
+      createdAt === undefined ||
+      (recommendation !== 'finish' && recommendation !== 'continue')
+    ) {
+      return historical('COORDINATOR_CHECKPOINT_CREATED lacks canonical fields');
+    }
+    if (target.getDebate(debateId) === undefined) {
+      return integrity(`COORDINATOR_CHECKPOINT_CREATED references unknown debate: ${debateId}`);
+    }
+    if (target.getRound(roundId) === undefined) {
+      return integrity(`COORDINATOR_CHECKPOINT_CREATED references unknown round: ${roundId}`);
+    }
+    if (target.getCheckpoint?.(roundId) === undefined) {
+      if (target.storeCheckpoint === undefined) {
+        return { kind: 'applied' };
+      }
+      target.storeCheckpoint(
+        createCoordinatorCheckpoint({
+          debateId,
+          roundId,
+          body,
+          recommendation,
+          createdAt,
+        }),
+      );
+    }
     return { kind: 'applied' };
   }
 

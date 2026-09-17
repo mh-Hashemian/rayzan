@@ -10,6 +10,8 @@ Thumbs.db
 
 dist-electron
 release
+apps/rayzan-desktop/release-installer*/
+graphify-out/
 out
 apps/rayzan-desktop/.electron-native/
 

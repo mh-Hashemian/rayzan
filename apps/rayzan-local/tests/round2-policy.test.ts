@@ -10,6 +10,12 @@ import {
   mergeReferencedMessageIds,
   watcherChallengesFromBatch,
 } from '../src/round2-policy.js';
+import {
+  coordinatorCheckpointPrompt,
+  coordinatorRound1Prompt,
+  coordinatorRoundPrompt,
+  coordinatorSynthesisPrompt,
+} from '../src/coordinator-prompt.js';
 
 describe('Round 2 common-evidence policy', () => {
   const qwen = createAgent({
@@ -56,7 +62,52 @@ describe('Round 2 common-evidence policy', () => {
     assert.equal(glmBody.includes(common), true);
     assert.match(qwenBody, /You are Qwen, a Watcher in Round 2/);
     assert.match(glmBody, /Challenge GLM/);
+    assert.match(qwenBody, /ROUND 2 RESPONSE CONTRACT/);
+    assert.match(qwenBody, /Fresh, substantive analysis/i);
+    assert.match(qwenBody, /Strongest challenge to your own position/);
     assert.equal(qwenBody.includes('Challenge GLM.'), false);
+  });
+
+  it('uses substantive prompt contracts without changing the debate topology', () => {
+    const round1 = coordinatorRound1Prompt({
+      problem: 'Design a Rayzan logo with a usable SVG deliverable.',
+      coordinatorId: 'coordinator',
+      debateId: 'debate-1',
+      roundId: 'round-1',
+      watchers: [qwen, glm],
+    });
+    const challenge = coordinatorRoundPrompt({
+      problem: 'Design a Rayzan logo with a usable SVG deliverable.',
+      coordinatorId: 'coordinator',
+      debateId: 'debate-1',
+      roundId: 'round-2',
+      roundNumber: 2,
+      watchers: [qwen, glm],
+      evidencePacket: 'Watcher evidence.',
+      intervention: 'Make it accessible.',
+    });
+    const checkpoint = coordinatorCheckpointPrompt({
+      coordinatorId: 'coordinator',
+      debateId: 'debate-1',
+      roundId: 'round-2',
+      roundNumber: 2,
+      evidencePacket: 'Watcher evidence.',
+    });
+    const synthesis = coordinatorSynthesisPrompt({
+      coordinatorId: 'coordinator',
+      debateId: 'debate-1',
+      evidencePacket: 'Watcher evidence.',
+    });
+
+    assert.match(round1, /multiple viable approaches/i);
+    assert.match(round1, /candidate deliverable/i);
+    assert.match(challenge, /strongest opposing argument/i);
+    assert.match(challenge, /Operator Deliverable Contract/);
+    assert.match(checkpoint, /# Coordinator's Current Judgment/);
+    assert.match(checkpoint, /Markdown comparison table/i);
+    assert.match(checkpoint, /Coordinator recommendation: FINISH \| CONTINUE/);
+    assert.match(synthesis, /# Coordinator's Final Judgment/);
+    assert.match(synthesis, /fullest usable final artifact/i);
   });
 
   it('augments omitted Coordinator references with both Round 1 response ids', () => {

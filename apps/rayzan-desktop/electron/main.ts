@@ -44,6 +44,12 @@ function localPublicDir(): string {
   return path.join(here(), '../../rayzan-local/public');
 }
 
+function appIconPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'rayzan-app-icon.ico')
+    : path.join(here(), '../resources/rayzan-app-icon.ico');
+}
+
 function desktopInfo(): DesktopInfo {
   return {
     userDataPath: app.getPath('userData'),
@@ -141,6 +147,7 @@ function createMainWindow(): void {
     width: 1280,
     height: 840,
     title: 'Rayzan',
+    icon: appIconPath(),
     autoHideMenuBar: true,
     webPreferences: {
       preload: preloadPath(),

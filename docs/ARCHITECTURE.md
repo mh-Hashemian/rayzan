@@ -280,9 +280,14 @@ A Debate tracks identity, topic, and status (`pending`, `active`, `completed`, `
 
 A Round is protocol state (`pending`, `active`, `collecting`, `completed`), not a provider conversation.
 
+## Operator-gated iterative debate
+
+`ROUND_COMPLETED` is mechanical: all active Watcher replies for that round are captured. The Coordinator then creates a first-class `CoordinatorCheckpoint`; only after `COORDINATOR_CHECKPOINT_CREATED` is the desktop derived as awaiting the Operator. A `DEBATE_CONTINUED` or `DEBATE_FINISH_REQUESTED` after that checkpoint closes the gate. No `AWAITING_OPERATOR` event is stored.
+
+Round 1 remains isolated. Every later round routes the Coordinator's shared-evidence challenge to all active Watchers. Prompts use the original problem, a bounded recent-evidence packet, the latest checkpoint, and optional exact operator intervention; raw history remains stored but is not concatenated indefinitely.
+
 ## Desktop product shell
 
 Rayzan Desktop (`apps/rayzan-desktop`) is the product shell. Electron main starts `createRayzanServer` from `@rayzan/local`, which is the same runtime as `pnpm start:local`. The React UI is a client of the existing localhost HTTP bridge. The browser extension uses that same bridge. There is one runtime, one SQLite file per environment, and one event history.
 
 CLI development keeps `apps/rayzan-local/data/rayzan.sqlite`. The packaged desktop app stores `<userData>/rayzan.sqlite` (on Windows, under `%APPDATA%\Rayzan`). Debug HTML is passed as `publicDir` so the Vite-bundled Electron main process can still serve `/debug`. The engineering dashboard remains at `/debug` and is not the product home screen.
-

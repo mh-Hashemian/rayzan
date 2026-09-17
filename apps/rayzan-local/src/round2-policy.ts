@@ -60,15 +60,42 @@ export function composeRound2WatcherBody(
   commonEvidence: string,
   challenge: string,
 ): string {
+  return composeRoundWatcherBody(2, watcherName, commonEvidence, challenge);
+}
+
+export function composeRoundWatcherBody(
+  roundNumber: number,
+  watcherName: string,
+  commonEvidence: string,
+  challenge: string,
+): string {
   return `ROLE
 ====
-You are ${watcherName}, a Watcher in Round 2.
+You are ${watcherName}, a Watcher in Round ${roundNumber}.
 
 ${commonEvidence}
 
-PERSONALIZED COORDINATOR CHALLENGE
-==================================
-${challenge}`;
+COORDINATOR CHALLENGE
+=====================
+${challenge}
+
+ROUND ${roundNumber} RESPONSE CONTRACT
+======================================
+Perform fresh, substantive analysis. Do not merely summarize Round 1 or narrate
+your private reasoning. Preserve the Operator's requested deliverable and stated
+constraints. Respond with clear, direct reasoning under these sections:
+
+A. Current position and what changed, if anything
+B. Response to the other agents' strongest relevant points
+C. Strongest challenge to your own position
+D. Reassessment from first principles or evidence
+E. New idea, approach, test, or deliverable improvement
+F. Key tradeoffs and risks
+G. Response to any Operator intervention in the evidence
+H. Recommendation and the most usable candidate deliverable you can provide now
+
+If an item is not applicable, say why rather than omitting it. Do not reveal
+hidden chain-of-thought, dispatch metadata, or a mechanical message log.`;
 }
 
 export function mergeReferencedMessageIds(

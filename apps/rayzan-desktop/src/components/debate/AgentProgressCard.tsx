@@ -52,23 +52,22 @@ export function AgentProgressCard(input: { readonly agent: AgentProgress }) {
         </span>
       </header>
       <p className="obs-agent-summary">{agent.summary}</p>
-      {agent.role === 'watcher' ? (
+      {agent.role === 'watcher' && agent.rounds.length > 0 ? (
         <dl className="obs-agent-rounds">
-          <div>
-            <dt>Round 1</dt>
-            <dd>{agent.round1 ?? 'Waiting'}</dd>
-          </div>
-          <div>
-            <dt>Round 2</dt>
-            <dd>{agent.round2 ?? 'Waiting'}</dd>
-          </div>
+          {agent.rounds.map((round) => (
+            <div key={round.number}>
+              <dt>Round {round.number}</dt>
+              <dd>{round.status}</dd>
+            </div>
+          ))}
         </dl>
       ) : null}
       <div className="obs-agent-bar" aria-hidden="true">
         <span style={{ width: `${pct}%` }} />
       </div>
       <p className="obs-agent-phases">
-        {agent.phasesDone} of {agent.phasesTotal} phases
+        {agent.phasesDone} of {agent.phasesTotal}{' '}
+        {agent.role === 'watcher' ? 'rounds' : 'stages'} complete
       </p>
     </article>
   );

@@ -50,6 +50,16 @@ export {
 export { ProtocolError } from './validate.js';
 export { createDebateSynthesis, type DebateSynthesis } from './synthesis.js';
 export {
+  createCoordinatorCheckpoint,
+  CHECKPOINT_RECOMMENDATIONS,
+  type CoordinatorCheckpoint,
+  type CheckpointRecommendation,
+} from './coordinator-checkpoint.js';
+export {
+  InMemoryCheckpointStore,
+  type CheckpointStore,
+} from './stores/checkpoint-store.js';
+export {
   InMemorySynthesisStore,
   type SynthesisStore,
 } from './stores/synthesis-store.js';

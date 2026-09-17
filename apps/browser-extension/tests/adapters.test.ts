@@ -148,6 +148,11 @@ describe('browser adapters', () => {
     assert.equal(deepSeekAssistantTurns(thinking).length, 1);
     assert.equal(deepSeekIsGenerating(thinking), true);
 
+    const partialJson = parseHTML(`<div class="ds-message">
+      <div class="ds-markdown ds-assistant-message-main-content">{</div>
+    </div>`).document;
+    assert.equal(deepSeekIsGenerating(partialJson), true);
+
     const done = parseHTML(`<div class="ds-message">
       <div class="ds-think-content">thought</div>
       <div class="ds-markdown ds-assistant-message-main-content">Final DeepSeek answer</div>

@@ -13,6 +13,7 @@ import {
   withAgentRole,
   createDebate,
   createDebateSynthesis,
+  createCoordinatorCheckpoint,
   createRound,
   isOpenDebateStatus,
   withDebateStatus,
@@ -22,11 +23,13 @@ import {
   InMemoryMessageStore,
   InMemoryRoundStore,
   InMemorySynthesisStore,
+  InMemoryCheckpointStore,
   type Agent,
   type AgentId,
   type AgentRole,
   type Debate,
   type Round,
+  type CoordinatorCheckpoint,
 } from '@rayzan/protocol';
 import { InMemoryEventStore } from '@rayzan/storage';
 import {
@@ -51,16 +54,16 @@ import {
 
 import {
   coordinatorRound1Prompt,
+  coordinatorRoundPrompt,
   coordinatorRound2Prompt,
+  coordinatorCheckpointPrompt,
   coordinatorSynthesisPrompt,
-  synthesisEvidencePacket,
   unwrapCoordinatorJson,
 } from './coordinator-prompt.js';
 import { OPERATOR_ID } from './demo-ids.js';
 import { DEFAULT_TEAM } from './default-team.js';
 import {
-  commonRound1Evidence,
-  composeRound2WatcherBody,
+  composeRoundWatcherBody,
   mergeReferencedMessageIds,
   round1EvidencePacket,
   watcherChallengesFromBatch,
@@ -134,6 +137,21 @@ export interface RayzanSnapshot {
     readonly number: number;
     readonly status: string;
   };
+  /** Dynamic round list. `round1`/`round2` remain for historical clients. */
+  readonly rounds: readonly {
+    readonly id: string;
+    readonly number: number;
+    readonly status: string;
+  }[];
+  readonly checkpoint?: {
+    readonly debateId: string;
+    readonly roundId: string;
+    readonly roundNumber: number;
+    readonly body: string;
+    readonly recommendation: 'finish' | 'continue';
+    readonly createdAt: string;
+  };
+  readonly awaitingOperator: boolean;
   readonly agents: readonly {
     readonly id: string;
     readonly name: string;
@@ -145,6 +163,10 @@ export interface RayzanSnapshot {
     readonly response?: string;
     readonly round1Status: string;
     readonly round2Status: string;
+    readonly roundStatuses: readonly {
+      readonly number: number;
+      readonly status: string;
+    }[];
     readonly capture?: BrowserCaptureState;
     readonly enabled: boolean;
   }[];
@@ -208,6 +230,8 @@ export interface RayzanSnapshot {
     readonly body: string;
     readonly createdAt: string;
   };
+  /** Final synthesis is in flight only after the Operator explicitly finishes. */
+  readonly synthesisPending: boolean;
   readonly lastCommands?: string;
   readonly lastError?: string;
   readonly canRetryCoordinatorDispatch?: boolean;
@@ -240,6 +264,7 @@ export class RayzanRuntime {
   readonly workflow: RoundWorkflow;
   readonly executor: CoordinatorCommandExecutor;
   readonly syntheses = new InMemorySynthesisStore();
+  readonly checkpoints = new InMemoryCheckpointStore();
 
   #started = false;
   #coordinatorBriefSent = false;
@@ -247,6 +272,7 @@ export class RayzanRuntime {
   #round2Bootstrapped = false;
   #round2Dispatched = false;
   #synthesisQueued = false;
+  #checkpointQueued = false;
   #seq = 0;
   #log: string[] = [];
   #lastError: string | undefined;
@@ -805,6 +831,17 @@ export class RayzanRuntime {
     );
     const round1 = this.#roundByNumber(1);
     const round2 = this.#roundByNumber(2);
+    const rounds = debateRecord
+      ? this.rounds.listByDebate(debateRecord.id).map((round) => ({
+          id: round.id,
+          number: round.number,
+          status: round.status,
+        }))
+      : [];
+    const checkpointRecord = this.#latestCheckpoint();
+    const checkpointRound = checkpointRecord
+      ? this.rounds.getById(checkpointRecord.roundId)
+      : undefined;
     let roundProgress;
     if (this.#started && round1) {
       try {
@@ -857,6 +894,20 @@ export class RayzanRuntime {
             },
           }
         : {}),
+      rounds,
+      awaitingOperator: this.#awaitingOperator(),
+      ...(checkpointRecord && checkpointRound
+        ? {
+            checkpoint: {
+              debateId: checkpointRecord.debateId,
+              roundId: checkpointRecord.roundId,
+              roundNumber: checkpointRound.number,
+              body: checkpointRecord.body,
+              recommendation: checkpointRecord.recommendation,
+              createdAt: checkpointRecord.createdAt,
+            },
+          }
+        : {}),
       agents: this.agents.list().map((agent) => {
         const presence = this.#presence.get(agent.id);
         const response = this.#latestResponseFrom(agent.id);
@@ -875,6 +926,13 @@ export class RayzanRuntime {
           ...(response ? { response } : {}),
           round1Status: this.#round1Status(agent),
           round2Status: this.#round2Status(agent),
+          roundStatuses: rounds.map((round) => ({
+            number: round.number,
+            status:
+              agent.role === 'watcher'
+                ? this.#roundStatus(agent, round.id)
+                : 'idle',
+          })),
           enabled: this.#watcherEnabled(agent),
           ...(presence?.capture ? { capture: presence.capture } : {}),
         };
@@ -917,6 +975,7 @@ export class RayzanRuntime {
       ...(coordinatorPlan ? { coordinatorPlan } : {}),
       round2Messages: this.#round2Messages(),
       ...(synthesis ? { synthesis } : {}),
+      synthesisPending: this.#synthesisQueued && synthesis === undefined,
       ...(this.#lastCommands && this.#activeDebate() !== undefined
         ? { lastCommands: this.#lastCommands }
         : {}),
@@ -947,9 +1006,7 @@ export class RayzanRuntime {
 
   #advanceAfterWatcherResponse(): void {
     this.#maybeCompleteRound1();
-    this.#ensureRound2Bootstrapped();
     this.#maybeCompleteRound2AndSynthesize();
-    this.#ensureSynthesisQueued();
   }
 
   #maybeCompleteRound1(): void {
@@ -971,27 +1028,19 @@ export class RayzanRuntime {
         payload: { number: 1, status: 'completed' },
       });
       this.#record('Round 1 auto-completed after all Watcher responses.');
+      this.#queueCoordinatorCheckpoint(round1);
     } catch {
       // Collection not ready.
     }
   }
 
-  /** Start Round 2 when Round 1 is done and Round 2 was never created. */
+  /** Legacy helper retained as a no-op: continuation is now operator-gated. */
   #ensureRound2Bootstrapped(): void {
-    const round1 = this.#roundByNumber(1);
-    if (round1 === undefined || round1.status !== 'completed') {
-      return;
-    }
-    if (this.#roundByNumber(2) !== undefined) {
-      this.#round2Bootstrapped = true;
-      return;
-    }
-    this.#round2Bootstrapped = false;
-    this.#bootstrapRound2AndNotifyCoordinator();
+    return;
   }
 
   #maybeCompleteRound2AndSynthesize(): void {
-    const round2 = this.#roundByNumber(2);
+    const round2 = this.#activeChallengeRound();
     if (
       round2 === undefined ||
       round2.status === 'completed' ||
@@ -1012,8 +1061,8 @@ export class RayzanRuntime {
         correlationId: `round:${round2.id}`,
         payload: { number: 2, status: 'completed' },
       });
-      this.#record('Round 2 auto-completed after all Watcher responses.');
-      this.#queueCoordinatorSynthesis();
+      this.#record(`Round ${round2.number} auto-completed after all Watcher responses.`);
+      this.#queueCoordinatorCheckpoint(round2);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.#lastError = message;
@@ -1023,22 +1072,115 @@ export class RayzanRuntime {
 
   /** Queue synthesis when Round 2 is done but the Coordinator was never prompted. */
   #ensureSynthesisQueued(): void {
-    const round2 = this.#roundByNumber(2);
-    if (round2 === undefined || round2.status !== 'completed') {
+    return;
+  }
+
+  #startNextRound(causationEventId: string, guidance?: string): void {
+    const debate = this.#debate();
+    const previous = this.#latestCheckpoint();
+    const watchers = this.#debateWatchers();
+    const number = this.rounds.listByDebate(debate.id).length + 1;
+    const roundId = this.#nextId('round');
+    this.rounds.create(createRound({ id: roundId, debateId: debate.id, number }));
+    this.#emit('ROUND_CREATED', {
+      debateId: debate.id,
+      roundId,
+      causationEventId,
+      correlationId: `round:${roundId}`,
+      payload: { number, participantIds: watchers.map((watcher) => watcher.id) },
+    });
+    this.workflow.startRound({
+      roundId,
+      participantIds: watchers.map((watcher) => watcher.id),
+    });
+    this.#round2Bootstrapped = true;
+    this.#round2Dispatched = false;
+    const coordinator = this.#requireSingleCoordinator();
+    const intent = this.planner.plan(
+      createDispatchPlan({
+        messageId: this.#nextId('msg-coordinator-evidence'),
+        debateId: debate.id,
+        senderId: OPERATOR_ID,
+        recipients: { type: 'explicit-agents', agentIds: [coordinator.id] },
+        kind: 'input',
+        body: coordinatorRoundPrompt({
+          problem: debate.topic,
+          coordinatorId: coordinator.id,
+          debateId: debate.id,
+          roundId,
+          roundNumber: number,
+          watchers,
+          evidencePacket: this.#boundedEvidence(),
+          latestCheckpoint: previous?.body,
+          intervention: guidance,
+        }),
+        referencedMessageIds: this.#recentResponseIds(),
+      }),
+    );
+    this.orchestrator.dispatch(intent);
+    this.#record(`Round ${number} created; Coordinator challenge plan queued.`);
+  }
+
+  #queueCoordinatorCheckpoint(round: Round): void {
+    if (this.checkpoints.getByRoundId(round.id) !== undefined || this.#checkpointQueued) {
       return;
     }
-    if (this.#synthesisAlreadyQueuedOrStored()) {
-      this.#synthesisQueued = true;
+    const debate = this.#debate();
+    const coordinator = this.#requireSingleCoordinator();
+    const intent = this.planner.plan(
+      createDispatchPlan({
+        messageId: this.#nextId('msg-coordinator-checkpoint'),
+        debateId: debate.id,
+        senderId: OPERATOR_ID,
+        recipients: { type: 'explicit-agents', agentIds: [coordinator.id] },
+        kind: 'input',
+        body: coordinatorCheckpointPrompt({
+          coordinatorId: coordinator.id,
+          debateId: debate.id,
+          roundId: round.id,
+          roundNumber: round.number,
+          evidencePacket: this.#boundedEvidence(),
+        }),
+        referencedMessageIds: this.#recentResponseIds(),
+      }),
+    );
+    this.orchestrator.dispatch(intent);
+    this.#checkpointQueued = true;
+    this.#record(`Round ${round.number} complete; Coordinator checkpoint queued.`);
+  }
+
+  #storeCoordinatorCheckpoint(text: string): void {
+    const round = this.#latestCompletedRound();
+    const debate = this.#debate();
+    if (round === undefined || this.checkpoints.getByRoundId(round.id) !== undefined) {
       return;
     }
-    this.#synthesisQueued = false;
-    try {
-      this.#queueCoordinatorSynthesis();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.#lastError = message;
-      this.#record(`Synthesis queue failed: ${message}`);
-    }
+    const createdAt = new Date().toISOString();
+    const recommendation = /Coordinator recommendation:\s*FINISH\b/i.test(text)
+      ? 'finish'
+      : 'continue';
+    const checkpoint = createCoordinatorCheckpoint({
+      debateId: debate.id,
+      roundId: round.id,
+      body: text,
+      recommendation,
+      createdAt,
+    });
+    this.checkpoints.store(checkpoint);
+    this.#emit('COORDINATOR_CHECKPOINT_CREATED', {
+      debateId: checkpoint.debateId,
+      roundId: checkpoint.roundId,
+      agentId: this.#requireSingleCoordinator().id,
+      causationEventId: this.#lastEventId('ROUND_COMPLETED'),
+      correlationId: `round:${checkpoint.roundId}`,
+      payload: {
+        body: checkpoint.body,
+        recommendation: checkpoint.recommendation,
+        createdAt: checkpoint.createdAt,
+      },
+    });
+    this.#checkpointQueued = false;
+    this.#record(`Coordinator checkpoint stored for Round ${round.number}.`);
   }
 
   #bootstrapRound2AndNotifyCoordinator(): void {
@@ -1117,11 +1259,15 @@ export class RayzanRuntime {
 
   #handleCoordinatorResponse(text: string): void {
     this.#lastCommands = text;
+    if (this.#checkpointQueued) {
+      this.#storeCoordinatorCheckpoint(text);
+      return;
+    }
     if (!this.#round1Dispatched) {
       this.#handleRound1CoordinatorBrief(text);
       return;
     }
-    if (!this.#round2Dispatched) {
+    if (!this.#round2Dispatched && this.#activeChallengeRound() !== undefined) {
       this.#handleRound2CoordinatorPlan(text);
       return;
     }
@@ -1176,8 +1322,10 @@ export class RayzanRuntime {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.#coordinatorParseError = message;
-      this.#lastError = message;
-      this.#record(`Coordinator command PARSE FAILED: ${message}`);
+      this.#lastError = looksLikeTruncatedCoordinatorJson(text)
+        ? `Coordinator Round 2 plan was captured before the JSON finished streaming (${message}). Raw length=${text.trim().length}.`
+        : message;
+      this.#record(`Coordinator command PARSE FAILED: ${this.#lastError}`);
     }
   }
 
@@ -1198,6 +1346,49 @@ export class RayzanRuntime {
     if (this.#lastError !== undefined) {
       throw new Error(this.#lastError);
     }
+  }
+
+  /** Operator authorizes one more shared-evidence round from a checkpoint gate. */
+  continueDebate(guidance?: string): void {
+    this.#requireStarted();
+    const checkpoint = this.#latestCheckpoint();
+    if (checkpoint === undefined || !this.#awaitingOperator()) {
+      throw new Error('A Coordinator checkpoint is required before continuing');
+    }
+    const trimmed = guidance?.trim() ?? '';
+    if (trimmed.length > 0) {
+      this.#emit('OPERATOR_INTERVENTION', {
+        debateId: checkpoint.debateId,
+        roundId: checkpoint.roundId,
+        correlationId: `round:${checkpoint.roundId}`,
+        payload: { guidance: trimmed },
+      });
+    }
+    const continued = this.#emit('DEBATE_CONTINUED', {
+      debateId: checkpoint.debateId,
+      roundId: checkpoint.roundId,
+      correlationId: `round:${checkpoint.roundId}`,
+      payload: { fromRoundId: checkpoint.roundId },
+    });
+    this.#checkpointQueued = false;
+    this.#startNextRound(continued.id, trimmed || undefined);
+  }
+
+  /** Operator explicitly requests the final report; synthesis is never automatic. */
+  finishDebate(): void {
+    this.#requireStarted();
+    const checkpoint = this.#latestCheckpoint();
+    if (checkpoint === undefined || !this.#awaitingOperator()) {
+      throw new Error('A Coordinator checkpoint is required before finishing');
+    }
+    const finish = this.#emit('DEBATE_FINISH_REQUESTED', {
+      debateId: checkpoint.debateId,
+      roundId: checkpoint.roundId,
+      correlationId: `debate:${checkpoint.debateId}`,
+      payload: { roundId: checkpoint.roundId },
+    });
+    this.#checkpointQueued = false;
+    this.#queueCoordinatorSynthesis(finish.id);
   }
 
   #bindRound1DispatchIds(
@@ -1247,11 +1438,14 @@ export class RayzanRuntime {
     if (this.#round2Dispatched) {
       return;
     }
-    const round2 = this.#requireRoundNumber(2);
+    const round2 = this.#activeChallengeRound();
+    if (round2 === undefined) {
+      throw new Error('no active follow-up round');
+    }
     const debate = this.#debate();
     const responses = this.#round1Responses();
     const baselineIds = responses.map((response) => response.messageId);
-    const common = commonRound1Evidence({ responses });
+    const common = `COMMON DEBATE EVIDENCE\n======================\n${this.#boundedEvidence()}`;
 
     for (const challenge of challenges) {
       this.workflow.dispatchPlan(
@@ -1266,7 +1460,8 @@ export class RayzanRuntime {
             agentIds: [challenge.agentId],
           },
           kind: 'query',
-          body: composeRound2WatcherBody(
+          body: composeRoundWatcherBody(
+            round2.number,
             challenge.name,
             common,
             challenge.challenge,
@@ -1280,27 +1475,18 @@ export class RayzanRuntime {
     }
     this.#round2Dispatched = true;
     this.#record(
-      'Personalized Round 2 prompts queued (common evidence prepended).',
+      `Personalized Round ${round2.number} prompts queued (common evidence prepended).`,
     );
   }
 
-  #queueCoordinatorSynthesis(): void {
+  #queueCoordinatorSynthesis(causationEventId?: string): void {
     if (this.#synthesisAlreadyQueuedOrStored()) {
       this.#synthesisQueued = true;
       return;
     }
     const debate = this.#debate();
     const coordinator = this.#requireSingleCoordinator();
-    const evidencePacket = synthesisEvidencePacket({
-      problem: debate.topic,
-      coordinatorBrief: this.#coordinatorRound1Brief(),
-      round1Responses: this.#round1Responses(),
-      round2Plan: this.#parsedChallenges?.map((challenge) => ({
-        name: challenge.name,
-        challenge: challenge.challenge,
-      })),
-      round2Responses: this.#round2Responses(),
-    });
+    const evidencePacket = this.#boundedEvidence();
     const intent = this.planner.plan(
       createDispatchPlan({
         messageId: this.#nextId('msg-coordinator-synthesis'),
@@ -1316,15 +1502,16 @@ export class RayzanRuntime {
           debateId: debate.id,
           evidencePacket,
         }),
-        referencedMessageIds: [
-          ...this.#round1Responses(),
-          ...this.#round2Responses(),
-        ].map((response) => response.messageId),
+        referencedMessageIds: this.#recentResponseIds(),
       }),
     );
     this.orchestrator.dispatch(intent);
     this.#synthesisQueued = true;
-    this.#record('Synthesis evidence packet queued for Coordinator.');
+    this.#record(
+      causationEventId
+        ? 'Operator requested final synthesis; evidence packet queued for Coordinator.'
+        : 'Synthesis evidence packet queued for Coordinator.',
+    );
   }
 
   #synthesisAlreadyQueuedOrStored(): boolean {
@@ -1732,6 +1919,26 @@ export class RayzanRuntime {
     return 'idle';
   }
 
+  #roundStatus(agent: Agent, roundId: string): string {
+    const delivery = this.#deliveryFor(agent.id, roundId);
+    if (
+      this.#presence.get(agent.id)?.phase === 'error' &&
+      delivery?.status !== 'responded'
+    ) {
+      return 'failed';
+    }
+    if (delivery?.status === 'responded') {
+      return 'responded';
+    }
+    if (delivery?.status === 'delivered') {
+      return 'generating';
+    }
+    if (delivery?.status === 'pending') {
+      return 'pending';
+    }
+    return 'idle';
+  }
+
   #deliveryFor(
     agentId: AgentId,
     roundId: string | undefined,
@@ -1921,6 +2128,114 @@ export class RayzanRuntime {
     return round;
   }
 
+  #activeChallengeRound(): Round | undefined {
+    const debate = this.#activeDebate();
+    if (debate === undefined) {
+      return undefined;
+    }
+    return this.rounds
+      .listByDebate(debate.id)
+      .filter((round) => round.number > 1 && round.status !== 'completed')
+      .at(-1);
+  }
+
+  #latestCompletedRound(): Round | undefined {
+    const debate = this.#focusDebate();
+    if (debate === undefined) {
+      return undefined;
+    }
+    return this.rounds
+      .listByDebate(debate.id)
+      .filter((round) => round.status === 'completed')
+      .sort((a, b) => a.number - b.number)
+      .at(-1);
+  }
+
+  #latestCheckpoint(): CoordinatorCheckpoint | undefined {
+    const debate = this.#focusDebate();
+    if (debate === undefined) {
+      return undefined;
+    }
+    return [...this.checkpoints.listByDebate(debate.id)]
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .at(-1);
+  }
+
+  /** Event-derived operator gate; no awaiting state is persisted. */
+  #awaitingOperator(): boolean {
+    const checkpoint = this.#latestCheckpoint();
+    if (checkpoint === undefined) {
+      return false;
+    }
+    const events = this.events.listByDebate(checkpoint.debateId);
+    let index = -1;
+    for (let cursor = events.length - 1; cursor >= 0; cursor -= 1) {
+      const event = events[cursor];
+      if (
+        event?.type === 'COORDINATOR_CHECKPOINT_CREATED' &&
+        event.roundId === checkpoint.roundId
+      ) {
+        index = cursor;
+        break;
+      }
+    }
+    return (
+      index >= 0 &&
+      !events.slice(index + 1).some(
+        (event) =>
+          event.type === 'DEBATE_CONTINUED' ||
+          event.type === 'DEBATE_FINISH_REQUESTED',
+      )
+    );
+  }
+
+  #recentResponseIds(): readonly string[] {
+    const debate = this.#focusDebate();
+    if (debate === undefined) {
+      return [];
+    }
+    return this.messages
+      .listByDebate(debate.id)
+      .filter((message) => message.kind === 'response')
+      .slice(-8)
+      .map((message) => message.id);
+  }
+
+  #boundedEvidence(): string {
+    const debate = this.#debate();
+    const latest = this.#latestCheckpoint();
+    const watcherById = new Map(
+      this.#debateWatchers().map((watcher) => [watcher.id, watcher.name]),
+    );
+    const responses = this.messages
+      .listByDebate(debate.id)
+      .filter(
+        (message) =>
+          message.kind === 'response' && watcherById.has(message.senderId),
+      )
+      .slice(-8)
+      .map(
+        (message) => `${watcherById.get(message.senderId) ?? message.senderId}:\n${message.body}`,
+      )
+      .join('\n\n');
+    const interventions = this.events
+      .listByDebate(debate.id)
+      .filter((event) => event.type === 'OPERATOR_INTERVENTION')
+      .map((event) => stringField(asPayload(event.payload), 'guidance'))
+      .filter((guidance): guidance is string => guidance !== undefined)
+      .slice(-3)
+      .join('\n\n');
+    return [
+      `Original problem:\n${debate.topic}`,
+      `Operator deliverable contract:\nPreserve the goal, requested output/artifact, and stated constraints from the original problem.`,
+      latest ? `Latest checkpoint:\n${latest.body}` : undefined,
+      interventions ? `Operator interventions:\n${interventions}` : undefined,
+      responses ? `Recent Watcher evidence:\n${responses}` : undefined,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join('\n\n');
+  }
+
   #bindingSnapshot(
     agent: Agent,
     now: number,
@@ -2103,6 +2418,7 @@ export class RayzanRuntime {
       this.#round2Bootstrapped = false;
       this.#round2Dispatched = false;
       this.#synthesisQueued = false;
+      this.#checkpointQueued = false;
       this.#lastCommands = undefined;
       this.#lastError = undefined;
       this.#coordinatorRaw = undefined;
@@ -2113,6 +2429,9 @@ export class RayzanRuntime {
     const rounds = this.rounds.listByDebate(debate.id);
     const round1 = rounds.find((round) => round.number === 1);
     const round2 = rounds.find((round) => round.number === 2);
+    const activeFollowUp = rounds
+      .filter((round) => round.number > 1 && round.status !== 'completed')
+      .at(-1);
     this.#round2Bootstrapped = round2 !== undefined;
     const coordinator = this.agents.listByRole('coordinator')[0];
     const messages = this.messages.listByDebate(debate.id);
@@ -2131,12 +2450,13 @@ export class RayzanRuntime {
         message.roundId === round1.id,
     );
     this.#round2Dispatched =
-      round2 !== undefined &&
+      activeFollowUp !== undefined &&
       messages.some(
         (message) =>
-          message.roundId === round2.id && message.kind === 'query',
+          message.roundId === activeFollowUp.id && message.kind === 'query',
       );
     this.#synthesisQueued = this.#synthesisAlreadyQueuedOrStored();
+    this.#checkpointQueued = false;
   }
 
   #resetDebateSessionState(): void {
@@ -2145,6 +2465,7 @@ export class RayzanRuntime {
     this.#round2Bootstrapped = false;
     this.#round2Dispatched = false;
     this.#synthesisQueued = false;
+    this.#checkpointQueued = false;
     this.#lastError = undefined;
     this.#lastCommands = undefined;
     this.#coordinatorRaw = undefined;
@@ -2211,6 +2532,11 @@ export class RayzanRuntime {
         this.syntheses.getByDebateId(asDebateId(debateId)),
       storeSynthesis: (synthesis) => {
         this.syntheses.store(synthesis);
+      },
+      getCheckpoint: (roundId) =>
+        this.checkpoints.getByRoundId(asRoundId(roundId)),
+      storeCheckpoint: (checkpoint) => {
+        this.checkpoints.store(checkpoint);
       },
       hydrateMessage: (message) => {
         this.transport.hydrateMessage(message);
@@ -2371,6 +2697,22 @@ export class RayzanRuntime {
 
   #record(line: string): void {
     this.#log.push(line);
+  }
+}
+
+function looksLikeTruncatedCoordinatorJson(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return true;
+  }
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('```'))) {
+    return false;
+  }
+  try {
+    JSON.parse(unwrapCoordinatorJson(trimmed));
+    return false;
+  } catch {
+    return true;
   }
 }
 

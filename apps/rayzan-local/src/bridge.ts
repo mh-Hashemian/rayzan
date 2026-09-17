@@ -182,6 +182,25 @@ export async function handleBridgeRequest(
     }
     if (
       request.method === 'POST' &&
+      url.pathname === '/api/session/continue-debate'
+    ) {
+      const body = await readJson(request);
+      runtime.continueDebate(
+        typeof body.guidance === 'string' ? body.guidance : undefined,
+      );
+      write(response, 200, runtime.snapshot());
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/session/finish-debate'
+    ) {
+      runtime.finishDebate();
+      write(response, 200, runtime.snapshot());
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
       url.pathname === '/api/session/change-coordinator'
     ) {
       const body = await readJson(request);

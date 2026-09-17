@@ -13,7 +13,7 @@
     "start": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
-    "test": "tsx --test tests/runtime.test.ts tests/bridge.test.ts tests/round2-policy.test.ts tests/event-persistence.test.ts tests/event-replay.test.ts tests/event-crash.test.ts tests/server-bootstrap.test.ts tests/debate-history.test.ts"
+    "test": "tsx --test tests/runtime.test.ts tests/bridge.test.ts tests/round2-policy.test.ts tests/operator-gate.test.ts tests/event-persistence.test.ts tests/event-replay.test.ts tests/event-crash.test.ts tests/server-bootstrap.test.ts tests/debate-history.test.ts"
   },
   "dependencies": {
     "@rayzan/events": "workspace:*",

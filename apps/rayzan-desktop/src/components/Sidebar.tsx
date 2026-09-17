@@ -1,4 +1,5 @@
 import { NAV_ITEMS, type ProductPage } from '../navigation.js';
+import rayzanLogo from '../assets/branding/rayzan-logo-tagline-white-cropped.png';
 
 export function Sidebar(input: {
   readonly page: ProductPage;
@@ -9,18 +10,12 @@ export function Sidebar(input: {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32" width="28" height="28">
-            <path
-              d="M16 3 L19 14 L29 16 L19 18 L16 29 L13 18 L3 16 L13 14 Z"
-              fill="currentColor"
-            />
-          </svg>
-        </div>
-        <div>
-          <p className="brand-name">Rayzan</p>
-          <p className="brand-tag">From many perspectives.</p>
-        </div>
+        <img
+          className="brand-logo"
+          src={rayzanLogo}
+          alt="Rayzan — From many perspectives."
+          draggable={false}
+        />
       </div>
 
       <nav className="side-nav" aria-label="Main">

@@ -207,24 +207,12 @@ export const grokAdapter: BrowserAdapter = {
       field,
       findSend: () => sendButton(),
       clickSend: (send) => {
-        // TipTap composer submits via the form; prefer a real DOM click over
-        // a synthetic React onClick so type=submit reaches form.onSubmit.
+        // A real click already submits Grok's surrounding form. Calling both
+        // click() and requestSubmit() posts the same prompt twice.
         try {
           send.click();
         } catch {
           clickControl(send);
-        }
-        const form = send.closest('form');
-        if (form instanceof HTMLFormElement && richComposerText(field).length > 0) {
-          try {
-            if (typeof form.requestSubmit === 'function') {
-              form.requestSubmit(
-                send instanceof HTMLButtonElement ? send : undefined,
-              );
-            }
-          } catch {
-            // Already clicked; ignore requestSubmit failures.
-          }
         }
       },
     });
@@ -243,8 +231,9 @@ export const grokAdapter: BrowserAdapter = {
         } catch {
           clickControl(retry);
         }
+      } else {
+        pressEnter(field);
       }
-      pressEnter(field);
       await waitUntil(accepted, {
         timeoutMs: 2500,
         message:

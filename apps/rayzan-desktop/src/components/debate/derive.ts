@@ -22,37 +22,25 @@ export function deriveDebateView(
     (agent) => agent.role === 'watcher' && agent.enabled,
   );
   const coordinator = state.agents.find((agent) => agent.role === 'coordinator');
-  const round1Done = state.round1?.status === 'completed';
-  const round2Exists = state.round2 !== undefined;
-  const round2Done = state.round2?.status === 'completed';
   const hasSynthesis = state.synthesis !== undefined;
   const framingDone = watchers.some((agent) => agent.round1Status !== 'idle');
-  const round1Responded = watchers.filter(
-    (agent) => agent.round1Status === 'responded',
-  ).length;
-  const round2Responded = watchers.filter(
-    (agent) => agent.round2Status === 'responded',
-  ).length;
 
   const stages = deriveStages({
     sessionStarted: state.sessionStarted || debate !== undefined,
     framingDone,
-    round1Done,
-    round2Exists,
-    round2Done,
     hasSynthesis,
+    rounds: state.rounds,
+    awaitingOperator: state.awaitingOperator,
+    synthesisPending: state.synthesisPending,
   });
   const badge = deriveBadge(stages, hasSynthesis, debate?.status);
   const agents = deriveAgents(state, coordinator?.id);
   const details = deriveDetails({
     framingDone,
-    round1Done,
-    round1Responded,
-    round2Exists,
-    round2Done,
-    round2Responded,
+    rounds: state.rounds,
     watcherCount: watchers.length,
-    hasSynthesis,
+    awaitingOperator: state.awaitingOperator,
+    synthesisPending: state.synthesisPending,
   });
 
   return {
@@ -63,11 +51,11 @@ export function deriveDebateView(
     details,
     nextAction: deriveNextAction({
       hasSynthesis,
-      round2Done,
-      round2Exists,
-      round1Done,
       framingDone,
       sessionStarted: state.sessionStarted || debate !== undefined,
+      rounds: state.rounds,
+      awaitingOperator: state.awaitingOperator,
+      synthesisPending: state.synthesisPending,
     }),
     agents,
     timeline: deriveTimeline(state),
@@ -78,6 +66,16 @@ export function deriveDebateView(
     },
     transcript: deriveTranscript(state),
     ...(state.synthesis ? { synthesis: state.synthesis.body } : {}),
+    ...(state.checkpoint
+      ? {
+          checkpoint: {
+            roundNumber: state.checkpoint.roundNumber,
+            body: state.checkpoint.body,
+            recommendation: state.checkpoint.recommendation,
+          },
+        }
+      : {}),
+    awaitingOperator: state.awaitingOperator,
     ...(state.lastError ? { lastError: state.lastError } : {}),
     ...(state.canRetryCoordinatorDispatch
       ? { canRetryCoordinatorDispatch: true }
@@ -109,40 +107,39 @@ function subtitleFromTopic(
 function deriveStages(input: {
   readonly sessionStarted: boolean;
   readonly framingDone: boolean;
-  readonly round1Done: boolean;
-  readonly round2Exists: boolean;
-  readonly round2Done: boolean;
   readonly hasSynthesis: boolean;
+  readonly rounds: RuntimeDebateState['rounds'];
+  readonly awaitingOperator: boolean;
+  readonly synthesisPending: boolean;
 }): ProgressStage[] {
-  // Exactly one stage is active at a time (earliest incomplete work).
-  let reframe: StageStatus = 'waiting';
-  let round1: StageStatus = 'waiting';
-  let challenge: StageStatus = 'waiting';
-  let synthesis: StageStatus = 'waiting';
-  let decision: StageStatus = 'waiting';
+  // A Round 1 record is created before the Coordinator has returned its framing
+  // brief.  Do not mark Reframe complete until that brief has reached a Watcher.
+  const reframe: StageStatus = input.framingDone
+    ? 'completed'
+    : input.sessionStarted
+      ? 'active'
+      : 'waiting';
+  const synthesis: StageStatus = input.hasSynthesis
+    ? 'completed'
+    : input.synthesisPending
+      ? 'active'
+      : 'waiting';
+  const decision: StageStatus = input.hasSynthesis ? 'completed' : 'waiting';
 
-  if (input.hasSynthesis) {
-    reframe = 'completed';
-    round1 = 'completed';
-    challenge = 'completed';
-    synthesis = 'completed';
-    decision = 'completed';
-  } else if (input.round2Done) {
-    reframe = 'completed';
-    round1 = 'completed';
-    challenge = 'completed';
-    synthesis = 'active';
-  } else if (input.round2Exists || input.round1Done) {
-    reframe = 'completed';
-    round1 = 'completed';
-    challenge = 'active';
-  } else if (input.framingDone) {
-    reframe = 'completed';
-    round1 = 'active';
-  } else if (input.sessionStarted) {
-    reframe = 'active';
-  }
-
+  const dynamicRounds = input.rounds.map((round) => ({
+    id: `round-${round.number}`,
+    label: `Round ${round.number}`,
+    detail: round.number === 1 ? 'Independent perspectives' : 'Shared evidence and challenge',
+    status: input.hasSynthesis || round.status === 'completed'
+      ? 'completed'
+      // Round 1 is created before its Coordinator framing brief is returned.
+      // Keep it queued until Reframe has genuinely handed work to the Watchers.
+      : round.number === 1 && !input.framingDone
+        ? 'waiting'
+      : round.status === 'active' || round.status === 'collecting'
+        ? 'active'
+        : 'waiting' as StageStatus,
+  }));
   return [
     {
       id: 'reframe',
@@ -150,18 +147,12 @@ function deriveStages(input: {
       detail: 'Clarify the question',
       status: reframe,
     },
-    {
-      id: 'round1',
-      label: 'Round 1',
-      detail: 'Initial perspectives',
-      status: round1,
-    },
-    {
-      id: 'challenge',
-      label: 'Challenge',
-      detail: 'Deepen the analysis',
-      status: challenge,
-    },
+    ...(dynamicRounds.length > 0
+      ? dynamicRounds
+      : [{ id: 'round1', label: 'Round 1', detail: 'Initial perspectives', status: 'waiting' as StageStatus }]),
+    ...(input.awaitingOperator && !input.synthesisPending
+      ? [{ id: 'operator', label: 'Awaiting Operator', detail: 'Choose the next step', status: 'active' as StageStatus }]
+      : []),
     {
       id: 'synthesis',
       label: 'Synthesis',
@@ -197,85 +188,53 @@ function deriveBadge(
 
 function deriveDetails(input: {
   readonly framingDone: boolean;
-  readonly round1Done: boolean;
-  readonly round1Responded: number;
-  readonly round2Exists: boolean;
-  readonly round2Done: boolean;
-  readonly round2Responded: number;
+  readonly rounds: RuntimeDebateState['rounds'];
   readonly watcherCount: number;
-  readonly hasSynthesis: boolean;
+  readonly awaitingOperator: boolean;
+  readonly synthesisPending: boolean;
 }): ProgressDetail[] {
-  const framing: StageStatus =
-    input.framingDone || input.round1Done
-      ? 'completed'
-      : 'active';
-  const round1: StageStatus = input.round1Done
-    ? 'completed'
-    : input.framingDone
-      ? 'active'
-      : 'waiting';
-  const round2: StageStatus = input.round2Done
-    ? 'completed'
-    : input.round2Exists || input.round1Done
-      ? 'active'
-      : 'waiting';
-  const watcherResponses: StageStatus =
-    input.round2Done ||
-    (input.round2Exists &&
-      input.round2Responded >= input.watcherCount &&
-      input.watcherCount > 0)
-      ? 'completed'
-      : input.round2Exists
-        ? 'active'
-        : 'waiting';
-
   return [
     {
       label: 'Coordinator framing',
-      status: framing,
+      status: input.framingDone ? 'completed' : 'active',
     },
-    {
-      label: 'Round 1 analysis',
-      status: round1,
-      note:
-        input.watcherCount > 0
-          ? `${input.round1Responded} of ${input.watcherCount} received`
-          : undefined,
-    },
-    {
-      label: 'Round 2 challenge',
-      status: round2,
-    },
-    {
-      label: 'Watcher responses',
-      status: watcherResponses,
-      note:
-        input.round2Exists && input.watcherCount > 0
-          ? `${input.round2Responded} of ${input.watcherCount} received`
-          : undefined,
-    },
+    ...input.rounds.map((round) => ({
+      label: `Round ${round.number}`,
+      status: (round.status === 'completed'
+        ? 'completed'
+        : round.status === 'active' || round.status === 'collecting'
+          ? 'active'
+          : 'waiting') as StageStatus,
+      note: input.watcherCount > 0 ? `${input.watcherCount} Watchers` : undefined,
+    })),
+    ...(input.awaitingOperator && !input.synthesisPending
+      ? [{ label: 'Operator decision', status: 'active' as StageStatus }]
+      : []),
   ];
 }
 
 function deriveNextAction(input: {
   readonly hasSynthesis: boolean;
-  readonly round2Done: boolean;
-  readonly round2Exists: boolean;
-  readonly round1Done: boolean;
   readonly framingDone: boolean;
   readonly sessionStarted: boolean;
+  readonly rounds: RuntimeDebateState['rounds'];
+  readonly awaitingOperator: boolean;
+  readonly synthesisPending: boolean;
 }): string | undefined {
   if (input.hasSynthesis) {
     return undefined;
   }
-  if (input.round2Done) {
+  if (input.synthesisPending) {
     return 'Coordinator synthesis';
   }
-  if (input.round2Exists) {
-    return 'Collect Round 2 Watcher responses';
+  if (input.awaitingOperator) {
+    return 'Choose Continue or Finish Decision';
   }
-  if (input.round1Done) {
-    return 'Coordinator Round 2 plan';
+  const active = input.rounds.find(
+    (round) => round.status === 'active' || round.status === 'collecting',
+  );
+  if (active) {
+    return `Collect Round ${active.number} Watcher responses`;
   }
   if (input.framingDone) {
     return 'Collect Round 1 Watcher responses';
@@ -310,60 +269,50 @@ function deriveCoordinator(
   state: RuntimeDebateState,
 ): AgentProgress {
   const hasSynthesis = state.synthesis !== undefined;
-  const round2Done = state.round2?.status === 'completed';
-  const round1Done = state.round1?.status === 'completed';
   const framingDone = state.agents.some(
     (item) => item.role === 'watcher' && item.enabled && item.round1Status !== 'idle',
   );
   const coordinatorWorking =
     agent.phase === 'sending' || agent.phase === 'generating';
-
-  let phasesDone = 0;
-  if (state.sessionStarted || state.activeDebate || state.debate) {
-    phasesDone = 1;
-  }
-  if (framingDone) {
-    phasesDone = 2;
-  }
-  if (round1Done) {
-    phasesDone = 3;
-  }
-  if (round2Done) {
-    phasesDone = 4;
-  }
-  if (hasSynthesis) {
-    phasesDone = 5;
-  }
+  const completedRounds = state.rounds.filter(
+    (round) => round.status === 'completed',
+  ).length;
+  const phasesTotal = Math.max(1, state.rounds.length + 1);
+  const phasesDone = hasSynthesis ? phasesTotal : completedRounds;
 
   let status: AgentPhaseStatus = 'Waiting';
   let summary = 'Waiting to frame the decision';
   if (hasSynthesis) {
     status = 'Completed';
     summary = 'Final synthesis stored';
+  } else if (state.awaitingOperator) {
+    status = 'Awaiting Operator';
+    summary = 'Checkpoint ready for your decision';
+  } else if (state.synthesisPending) {
+    status = coordinatorWorking ? 'Thinking' : 'Waiting';
+    summary = coordinatorWorking
+      ? 'Preparing final synthesis'
+      : 'Final synthesis queued';
   } else if (coordinatorWorking) {
-    // Only show loading when the Coordinator itself is generating.
     status = 'Thinking';
-    if (round2Done) {
-      summary = 'Preparing final synthesis';
-    } else if (round1Done && !state.round2) {
-      summary = 'Reviewing Round 1 evidence';
+    const activeRound = state.rounds.find(
+      (round) => round.status === 'active' || round.status === 'collecting',
+    );
+    if (activeRound && activeRound.number > 1) {
+      summary = `Preparing Round ${activeRound.number} challenges`;
     } else if (!framingDone) {
       summary = 'Framing the Operator question';
     } else {
       summary = 'Working';
     }
-  } else if (round2Done) {
-    status = 'Thinking';
-    summary = 'Preparing final synthesis';
-  } else if (state.round2) {
-    status = 'Waiting';
-    summary = 'Waiting for Round 2 Watcher responses';
-  } else if (round1Done) {
-    status = 'Thinking';
-    summary = 'Reviewing Round 1 evidence';
   } else if (framingDone) {
     status = 'Waiting';
-    summary = 'Waiting for Round 1 Watcher responses';
+    const activeRound = state.rounds.find(
+      (round) => round.status === 'active' || round.status === 'collecting',
+    );
+    summary = activeRound
+      ? `Waiting for Round ${activeRound.number} Watcher responses`
+      : 'Waiting for the next debate step';
   } else if (state.sessionStarted || state.activeDebate || state.debate) {
     status = 'Thinking';
     summary = 'Framing the Operator question';
@@ -377,7 +326,8 @@ function deriveCoordinator(
     status,
     summary,
     phasesDone,
-    phasesTotal: 5,
+    phasesTotal,
+    rounds: [],
   };
 }
 
@@ -386,21 +336,14 @@ function deriveWatcher(
   state: RuntimeDebateState,
   _coordinatorId: string | undefined,
 ): AgentProgress {
-  const round1Label = roundLabel(agent.round1Status);
-  const round2Label = roundLabel(agent.round2Status);
-  let phasesDone = 0;
-  if (agent.round1Status === 'responded') {
-    phasesDone = 2;
-  } else if (agent.round1Status !== 'idle') {
-    phasesDone = 1;
-  }
-  if (agent.round2Status === 'responded') {
-    phasesDone = 4;
-  } else if (agent.round2Status !== 'idle') {
-    phasesDone = 3;
-  }
+  const rounds = agent.roundStatuses.map((round) => ({
+    number: round.number,
+    status: roundLabel(round.status),
+  }));
+  const phasesTotal = Math.max(1, rounds.length);
+  let phasesDone = rounds.filter((round) => round.status === 'Completed').length;
   if (state.synthesis) {
-    phasesDone = 5;
+    phasesDone = phasesTotal;
   }
 
   let status: AgentPhaseStatus = 'Waiting';
@@ -408,26 +351,22 @@ function deriveWatcher(
   if (state.synthesis) {
     status = 'Completed';
     summary = 'Participation complete';
-  } else if (agent.round2Status === 'responded') {
+  } else if (state.awaitingOperator) {
     status = 'Responded';
-    summary = 'Round 2 response received';
+    summary = 'Round participation complete';
+  } else if (state.synthesisPending) {
+    status = 'Responded';
+    summary = 'Awaiting final Coordinator report';
+  } else if (rounds.at(-1)?.status === 'Completed') {
+    status = 'Responded';
+    summary = `Round ${rounds.at(-1)?.number} response received`;
   } else if (
-    isWorkingStatus(agent.round2Status) ||
-    isBusyPhase(agent.phase ?? 'idle', agent.round2Status)
+    isWorkingStatus(agent.roundStatuses.at(-1)?.status ?? 'idle') ||
+    isBusyPhase(agent.phase ?? 'idle', agent.roundStatuses.at(-1)?.status ?? 'idle')
   ) {
     status = 'Thinking';
-    summary = 'Working on Round 2 challenge';
-  } else if (agent.round1Status === 'responded') {
-    status = 'Responded';
-    summary = state.round2
-      ? 'Waiting for Round 2 challenge'
-      : 'Round 1 complete · Awaiting challenges';
-  } else if (
-    isWorkingStatus(agent.round1Status) ||
-    isBusyPhase(agent.phase ?? 'idle', agent.round1Status)
-  ) {
-    status = 'Thinking';
-    summary = 'Working on Round 1 analysis';
+    const current = rounds.at(-1)?.number ?? 1;
+    summary = `Working on Round ${current} analysis`;
   }
 
   return {
@@ -438,9 +377,8 @@ function deriveWatcher(
     status,
     summary,
     phasesDone,
-    phasesTotal: 5,
-    round1: round1Label,
-    round2: round2Label,
+    phasesTotal,
+    rounds,
   };
 }
 
@@ -486,10 +424,7 @@ function deriveTimeline(state: RuntimeDebateState): TimelineItem[] {
     });
   }
 
-  const watchers = state.agents.filter(
-    (agent) => agent.role === 'watcher' && agent.enabled,
-  );
-  if (watchers.some((agent) => agent.round1Status !== 'idle')) {
+  if (state.rounds.length > 0) {
     items.push({
       id: 'framed',
       title: 'Coordinator framed the question',
@@ -498,45 +433,27 @@ function deriveTimeline(state: RuntimeDebateState): TimelineItem[] {
       status: 'completed',
     });
   }
-  for (const watcher of watchers) {
-    if (watcher.round1Status === 'responded') {
-      items.push({
-        id: `r1-${watcher.id}`,
-        title: `${watcher.name} submitted Round 1 analysis`,
-        detail: 'Independent perspective captured.',
-        time: '',
-        status: 'completed',
-      });
-    }
-  }
-  if (state.round1?.status === 'completed') {
+  for (const round of state.rounds) {
+    const completed = round.status === 'completed';
     items.push({
-      id: 'r1-done',
-      title: 'Round 1 completed',
-      detail: 'All included Watcher responses collected.',
-      time: '',
-      status: 'completed',
+      id: `round-${round.number}`,
+      title: `Round ${round.number} ${completed ? 'completed' : 'in progress'}`,
+      detail:
+        round.number === 1
+          ? 'Independent Watcher perspectives are collected.'
+          : 'Shared evidence and Coordinator-directed challenges.',
+      time: completed ? '' : 'In progress',
+      status: completed ? 'completed' : 'active',
     });
   }
-  if (state.round2) {
+  if (state.awaitingOperator) {
     items.push({
-      id: 'r2-start',
-      title: 'Coordinator sent Round 2 challenges',
-      detail: 'Personalized challenges queued for Watchers.',
-      time: '',
-      status: 'completed',
+      id: 'operator-gate',
+      title: 'Awaiting Operator decision',
+      detail: 'Choose Continue, Add Guidance + Continue, or Finish Decision.',
+      time: 'Your action',
+      status: 'active',
     });
-  }
-  for (const watcher of watchers) {
-    if (watcher.round2Status === 'responded') {
-      items.push({
-        id: `r2-${watcher.id}`,
-        title: `${watcher.name} Round 2 response captured`,
-        detail: 'Challenge reply stored.',
-        time: '',
-        status: 'completed',
-      });
-    }
   }
   if (state.synthesis) {
     items.push({
@@ -546,19 +463,11 @@ function deriveTimeline(state: RuntimeDebateState): TimelineItem[] {
       time: formatTime(state.synthesis.createdAt),
       status: 'completed',
     });
-  } else if (state.round2?.status === 'completed') {
+  } else if (state.synthesisPending) {
     items.push({
       id: 'synth-wait',
       title: 'Synthesis started',
       detail: 'Coordinator is preparing the final report.',
-      time: 'In progress',
-      status: 'active',
-    });
-  } else if (state.round1?.status === 'completed' && !state.round2) {
-    items.push({
-      id: 'r2-wait',
-      title: 'Coordinator reviewing Round 1',
-      detail: 'Preparing personalized Round 2 challenges.',
       time: 'In progress',
       status: 'active',
     });
