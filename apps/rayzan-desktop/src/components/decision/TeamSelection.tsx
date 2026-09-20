@@ -3,6 +3,10 @@ import { useState } from 'react';
 import type { AgentView } from '../../api.js';
 import { ProviderLogo } from '../providers/ProviderLogo.js';
 
+function isAvailable(agent: AgentView): boolean {
+  return agent.connection === 'connected';
+}
+
 export function TeamSelection(input: {
   readonly team: readonly AgentView[];
   readonly onChangeCoordinator: (agentId: string) => Promise<void>;
@@ -13,8 +17,9 @@ export function TeamSelection(input: {
   readonly onBack: () => void;
   readonly onContinue: () => void;
 }) {
-  const coordinators = input.team.filter((agent) => agent.role === 'coordinator');
-  const watchers = input.team.filter((agent) => agent.role === 'watcher');
+  const available = input.team.filter(isAvailable);
+  const coordinators = available.filter((agent) => agent.role === 'coordinator');
+  const watchers = available.filter((agent) => agent.role === 'watcher');
   const coordinator = coordinators[0];
   const includedWatchers = watchers.filter((agent) => agent.enabled);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -41,7 +46,8 @@ export function TeamSelection(input: {
   }
 
   const canContinue =
-    coordinator !== undefined && includedWatchers.length >= 2;
+    coordinator !== undefined &&
+    includedWatchers.length >= 1;
 
   return (
     <section className="wizard-panel">
@@ -49,8 +55,8 @@ export function TeamSelection(input: {
         <p className="wizard-step-label">Step 2 of 3</p>
         <h1>AI Team</h1>
         <p className="lede">
-          Rayzan will ask independent AI perspectives, then synthesize the
-          discussion.
+          Only connected providers can join a Decision. Connect others in
+          Settings first.
         </p>
       </header>
 
@@ -58,7 +64,10 @@ export function TeamSelection(input: {
         <div className="wizard-team-col">
           <h2 className="team-label">Coordinator</h2>
           {coordinator === undefined ? (
-            <p className="empty">No coordinator registered.</p>
+            <p className="empty">
+              No connected Coordinator. Connect DeepSeek (or another Coordinator)
+              in Settings.
+            </p>
           ) : (
             <article className="wizard-coord-row">
               <ProviderLogo
@@ -69,20 +78,22 @@ export function TeamSelection(input: {
               <span className="wizard-coord-copy">
                 {coordinator.name}
                 <small>
-                  Provider: {coordinator.provider ?? coordinator.name}
+                  Provider: {coordinator.provider ?? coordinator.name} · Connected
                 </small>
               </span>
-              <button
-                type="button"
-                className="text-btn"
-                onClick={() => {
-                  setSelectedId(coordinator.id);
-                  setError(undefined);
-                  setPickerOpen(true);
-                }}
-              >
-                Change
-              </button>
+              {coordinators.length > 1 ? (
+                <button
+                  type="button"
+                  className="text-btn"
+                  onClick={() => {
+                    setSelectedId(coordinator.id);
+                    setError(undefined);
+                    setPickerOpen(true);
+                  }}
+                >
+                  Change
+                </button>
+              ) : null}
             </article>
           )}
         </div>
@@ -90,7 +101,9 @@ export function TeamSelection(input: {
         <div className="wizard-team-col">
           <h2 className="team-label">Watchers</h2>
           {watchers.length === 0 ? (
-            <p className="empty">No watchers registered.</p>
+            <p className="empty">
+              No connected Watchers. Connect ChatGPT in Settings.
+            </p>
           ) : (
             <ul className="wizard-watcher-list">
               {watchers.map((agent) => (
@@ -114,12 +127,7 @@ export function TeamSelection(input: {
                     <span>
                       {agent.name}
                       <small>
-                        {agent.provider ?? agent.name}
-                        {agent.connection === 'connected'
-                          ? ' · Connected'
-                          : agent.connection === 'error'
-                            ? ' · Error'
-                            : ' · Disconnected'}
+                        {agent.provider ?? agent.name} · Connected
                       </small>
                     </span>
                   </label>
@@ -132,7 +140,9 @@ export function TeamSelection(input: {
 
       {!canContinue ? (
         <p className="error-text">
-          Include at least two Watchers before continuing.
+          {coordinator === undefined
+            ? 'Connect a Coordinator before continuing.'
+            : 'Include at least one connected Watcher before continuing.'}
         </p>
       ) : null}
 
@@ -159,11 +169,10 @@ export function TeamSelection(input: {
           >
             <h2 id="wizard-coordinator-title">Change Coordinator</h2>
             <p className="lede">
-              This changes who leads future debates. Existing debates keep their
-              original Coordinator.
+              Only connected providers can lead a Decision.
             </p>
             <ul className="picker-list">
-              {input.team.map((agent) => (
+              {coordinators.map((agent) => (
                 <li key={agent.id}>
                   <label>
                     <input

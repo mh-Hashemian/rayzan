@@ -11,6 +11,11 @@ import {
   LOCAL_BRIDGE_PORT,
   type RayzanServer,
 } from '@rayzan/local';
+import {
+  ManagedProviderManager,
+  type ManagedAttachAgent,
+  type ManagedProviderId,
+} from './managed-provider/index.js';
 
 const BRIDGE_ORIGIN = `http://127.0.0.1:${LOCAL_BRIDGE_PORT}`;
 
@@ -28,6 +33,7 @@ let rayzan: RayzanServer | undefined;
 let ownsRuntime = false;
 let runtimeError: string | undefined;
 let quitting = false;
+let managedProviders: ManagedProviderManager | undefined;
 
 function here(): string {
   return path.dirname(fileURLToPath(import.meta.url));
@@ -58,6 +64,16 @@ function desktopInfo(): DesktopInfo {
     ownsRuntime,
     ...(runtimeError !== undefined ? { runtimeError } : {}),
   };
+}
+
+function ensureManagedProviders(): ManagedProviderManager {
+  if (managedProviders === undefined) {
+    managedProviders = new ManagedProviderManager({
+      userDataPath: app.getPath('userData'),
+      appIcon: appIconPath(),
+    });
+  }
+  return managedProviders;
 }
 
 function portOccupied(port: number, host: string): Promise<boolean> {
@@ -209,6 +225,61 @@ async function shutdownRuntime(): Promise<void> {
   await current.close();
 }
 
+function registerManagedProviderIpc(): void {
+  ipcMain.handle('providers:list', async () => {
+    return ensureManagedProviders().listProviderStatuses();
+  });
+  ipcMain.handle('providers:refresh', async () => {
+    const manager = ensureManagedProviders();
+    if (manager.isRestoring()) {
+      return manager.listProviderStatuses();
+    }
+    return manager.refreshAll();
+  });
+  ipcMain.handle('providers:restoring', async () => {
+    return ensureManagedProviders().isRestoring();
+  });
+  ipcMain.handle(
+    'providers:connect',
+    async (_event, providerId: ManagedProviderId) => {
+      return ensureManagedProviders().connect(providerId);
+    },
+  );
+  ipcMain.handle(
+    'providers:open',
+    async (_event, providerId: ManagedProviderId) => {
+      await ensureManagedProviders().open(providerId);
+    },
+  );
+  ipcMain.handle(
+    'providers:reconnect',
+    async (_event, providerId: ManagedProviderId) => {
+      return ensureManagedProviders().reconnect(providerId);
+    },
+  );
+  ipcMain.handle(
+    'providers:attach-debate',
+    async (
+      _event,
+      payload: {
+        readonly debateId: string;
+        readonly agents: readonly ManagedAttachAgent[];
+      },
+    ) => {
+      return ensureManagedProviders().attachDebate(payload);
+    },
+  );
+  ipcMain.handle(
+    'providers:debate-ownership',
+    async (_event, debateId: string) => {
+      return ensureManagedProviders().ownershipsForDebate(debateId);
+    },
+  );
+  ipcMain.handle('providers:stop-debate', async (_event, debateId: string) => {
+    ensureManagedProviders().stopDebate(debateId);
+  });
+}
+
 app.whenReady().then(async () => {
   ipcMain.handle('desktop:info', () => desktopInfo());
   ipcMain.handle('desktop:retry', async () => {
@@ -219,9 +290,31 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:open-debug', () => {
     openDebugWindow();
   });
+  registerManagedProviderIpc();
   await ensureRuntime();
+  // Start session restore before the UI mounts so Home/Settings see Restoring.
+  ensureManagedProviders();
   createMainWindow();
+  void resumeManagedDebateIfAny();
 });
+
+async function resumeManagedDebateIfAny(): Promise<void> {
+  try {
+    const response = await fetch(`${BRIDGE_ORIGIN}/api/status`);
+    if (!response.ok) {
+      return;
+    }
+    const status = (await response.json()) as {
+      activeDebate?: { id: string } | null;
+    };
+    const debateId = status.activeDebate?.id;
+    if (debateId) {
+      ensureManagedProviders().resumeDebate(debateId);
+    }
+  } catch {
+    // Runtime may still be starting.
+  }
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -230,7 +323,12 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
-  if (quitting || !ownsRuntime) {
+  if (quitting) {
+    return;
+  }
+  managedProviders?.dispose();
+  managedProviders = undefined;
+  if (!ownsRuntime) {
     return;
   }
   event.preventDefault();

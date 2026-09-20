@@ -52,6 +52,9 @@ export function AgentProgressCard(input: { readonly agent: AgentProgress }) {
         </span>
       </header>
       <p className="obs-agent-summary">{agent.summary}</p>
+      {agent.sessionMode === 'managed' ? (
+        <p className="obs-agent-session">● Managed session</p>
+      ) : null}
       {agent.role === 'watcher' && agent.rounds.length > 0 ? (
         <dl className="obs-agent-rounds">
           {agent.rounds.map((round) => (

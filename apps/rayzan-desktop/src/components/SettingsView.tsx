@@ -1,5 +1,6 @@
 import type { DesktopInfo } from '../desktop.js';
 import type { RayzanDesktopStatus } from '../api.js';
+import { AiProvidersPanel } from './settings/AiProvidersPanel.js';
 
 function recoveryLabel(status: RayzanDesktopStatus | undefined): string {
   if (status === undefined) {
@@ -29,8 +30,8 @@ export function SettingsView(input: {
     <section className="page">
       <h1>Settings</h1>
       <p className="lede">
-        Runtime, database, and the engineering debug dashboard stay here — not
-        on the home screen.
+        Connect AI providers and review runtime health. Provider pages stay
+        managed by Rayzan — not as permanent tabs in the product shell.
       </p>
 
       {input.error ? (
@@ -42,6 +43,9 @@ export function SettingsView(input: {
         </div>
       ) : null}
 
+      <AiProvidersPanel />
+
+      <h2 className="settings-runtime-heading">Runtime</h2>
       <ul className="status-list">
         <li>
           Runtime

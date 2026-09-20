@@ -78,18 +78,63 @@ export function DecisionWizard(input: {
           }}
           onStart={async () => {
             const coordinator = input.team.find(
-              (agent) => agent.role === 'coordinator',
+              (agent) =>
+                agent.role === 'coordinator' && agent.connection === 'connected',
             );
             const watchers = input.team.filter(
-              (agent) => agent.role === 'watcher' && agent.enabled,
+              (agent) =>
+                agent.role === 'watcher' &&
+                agent.enabled &&
+                agent.connection === 'connected',
             );
-            await startLiveDecision(
+            if (coordinator === undefined) {
+              throw new Error(
+                'Coordinator is not connected. Connect it in Settings → AI Providers.',
+              );
+            }
+            if (watchers.length === 0) {
+              throw new Error(
+                'No connected Watchers included. Connect ChatGPT in Settings, or include a connected Watcher.',
+              );
+            }
+            // Runtime includes every enabled Watcher — drop disconnected ones
+            // so the debate cannot stall on unavailable participants.
+            for (const agent of input.team) {
+              if (
+                agent.role === 'watcher' &&
+                agent.enabled &&
+                agent.connection !== 'connected'
+              ) {
+                await input.onSetWatcherParticipation(agent.id, false);
+              }
+            }
+            const participants = [coordinator, ...watchers];
+            const state = await startLiveDecision(
               composeDecisionProblem({
                 question: draft.question,
                 context: draft.context,
                 goal: draft.goal,
               }),
             );
+            const debateId = state.debate?.id ?? state.activeDebate?.id;
+            if (
+              debateId &&
+              window.rayzanDesktop?.attachDebateConversations !== undefined
+            ) {
+              const attach = await window.rayzanDesktop.attachDebateConversations(
+                {
+                  debateId,
+                  agents: participants.map((agent) => ({
+                    agentId: agent.id,
+                    name: agent.name,
+                    provider: agent.provider,
+                  })),
+                },
+              );
+              if (attach.error) {
+                throw new Error(attach.error);
+              }
+            }
             input.onDecisionStarted({
               question: draft.question.trim(),
               coordinatorName: coordinator?.name ?? 'Coordinator',

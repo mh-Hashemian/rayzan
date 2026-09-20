@@ -3,8 +3,8 @@ import { useState } from 'react';
 import type { AgentView } from '../../api.js';
 import type { DecisionDraft } from './types.js';
 
-/** Runtime requires at least two included Watchers for the live path. */
-export const REQUIRED_WATCHERS = 2;
+/** Runtime requires at least one included Watcher for the live path. */
+export const REQUIRED_WATCHERS = 1;
 
 export function DecisionReview(input: {
   readonly draft: DecisionDraft;
@@ -12,9 +12,14 @@ export function DecisionReview(input: {
   readonly onBack: () => void;
   readonly onStart: () => Promise<void>;
 }) {
-  const coordinator = input.team.find((agent) => agent.role === 'coordinator');
+  const coordinator = input.team.find(
+    (agent) => agent.role === 'coordinator' && agent.connection === 'connected',
+  );
   const watchers = input.team.filter(
-    (agent) => agent.role === 'watcher' && agent.enabled,
+    (agent) =>
+      agent.role === 'watcher' &&
+      agent.enabled &&
+      agent.connection === 'connected',
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -65,7 +70,7 @@ export function DecisionReview(input: {
       <div className="review-card">
         <h2>AI Team</h2>
         <h3>Coordinator</h3>
-        <p className="review-copy">{coordinator?.name ?? 'None selected'}</p>
+        <p className="review-copy">{coordinator?.name ?? 'None available'}</p>
         <h3>Watchers</h3>
         {watchers.length === 0 ? (
           <p className="review-copy">None included</p>
@@ -78,7 +83,7 @@ export function DecisionReview(input: {
         )}
         {!watchersOk ? (
           <p className="wizard-inline-note">
-            Include at least {REQUIRED_WATCHERS} Watchers to start.
+            Include at least {REQUIRED_WATCHERS} connected Watchers to start.
           </p>
         ) : null}
       </div>

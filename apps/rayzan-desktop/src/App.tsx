@@ -215,6 +215,9 @@ export function App() {
               }
               liveTick={liveTick}
               onBackHome={() => {
+                setLaunch(undefined);
+                setLiveTick((tick) => tick + 1);
+                void hydrate('live');
                 setPage('home');
               }}
             />

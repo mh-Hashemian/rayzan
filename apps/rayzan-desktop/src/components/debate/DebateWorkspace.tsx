@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   fetchRuntimeState,
   continueDebate,
+  endDebate,
   finishDebate,
   retryCoordinatorDispatch,
   type RuntimeDebateState,
@@ -36,6 +37,10 @@ export function DebateWorkspace(input: {
   const [showReport, setShowReport] = useState(false);
   const [guidance, setGuidance] = useState('');
   const [gateBusy, setGateBusy] = useState(false);
+  const [stopBusy, setStopBusy] = useState(false);
+  const [managedAgentIds, setManagedAgentIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
 
   useEffect(() => {
     if (input.useMock) {
@@ -48,6 +53,17 @@ export function DebateWorkspace(input: {
         if (!cancelled) {
           setState(next);
           setLoadError(undefined);
+          const debateId = next.debate?.id ?? next.activeDebate?.id;
+          if (debateId && window.rayzanDesktop?.debateOwnership) {
+            const ownership = await window.rayzanDesktop.debateOwnership(
+              debateId,
+            );
+            if (!cancelled) {
+              setManagedAgentIds(
+                new Set(ownership.map((item) => item.agentId)),
+              );
+            }
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -64,7 +80,7 @@ export function DebateWorkspace(input: {
     };
   }, [input.liveTick, input.useMock]);
 
-  const view: DebateWorkspaceView = input.useMock
+  const baseView: DebateWorkspaceView = input.useMock
     ? {
         ...MOCK_DEBATE_VIEW,
         title: input.launch.question || MOCK_DEBATE_VIEW.title,
@@ -115,6 +131,15 @@ export function DebateWorkspace(input: {
           awaitingOperator: false,
         };
 
+  const view: DebateWorkspaceView = {
+    ...baseView,
+    agents: baseView.agents.map((agent) =>
+      managedAgentIds.has(agent.id)
+        ? { ...agent, sessionMode: 'managed' as const }
+        : agent,
+    ),
+  };
+
   const complete = view.badge === 'Completed' && view.synthesis !== undefined;
   const showingFinal = complete || (showReport && view.synthesis !== undefined);
 
@@ -148,6 +173,39 @@ export function DebateWorkspace(input: {
     }
   }
 
+  async function stopDecision() {
+    const debateId = state?.debate?.id ?? state?.activeDebate?.id;
+    if (debateId === undefined) {
+      input.onBackHome();
+      return;
+    }
+    if (
+      !window.confirm(
+        'Stop this Decision? Progress is kept in history, and you can start a new one.',
+      )
+    ) {
+      return;
+    }
+    setStopBusy(true);
+    setLoadError(undefined);
+    try {
+      await endDebate();
+      await window.rayzanDesktop?.stopDebateProviders?.(debateId);
+      input.onBackHome();
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : 'Could not stop this Decision',
+      );
+    } finally {
+      setStopBusy(false);
+    }
+  }
+
+  const canStop =
+    !input.useMock &&
+    !complete &&
+    (state?.debate !== undefined || state?.activeDebate !== undefined);
+
   return (
     <section className="page obs-workspace">
       <button type="button" className="back-link" onClick={input.onBackHome}>
@@ -166,6 +224,18 @@ export function DebateWorkspace(input: {
           <p className="lede">{view.subtitle}</p>
         </div>
         <div className="obs-header-actions">
+          {canStop ? (
+            <button
+              type="button"
+              className="btn danger"
+              disabled={stopBusy || gateBusy}
+              onClick={() => {
+                void stopDecision();
+              }}
+            >
+              {stopBusy ? 'Stopping…' : 'Stop Decision'}
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn"
@@ -177,9 +247,6 @@ export function DebateWorkspace(input: {
             }}
           >
             View Decision Details
-          </button>
-          <button type="button" className="icon-btn" aria-label="More">
-            ···
           </button>
         </div>
       </header>

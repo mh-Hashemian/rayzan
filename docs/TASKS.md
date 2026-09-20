@@ -65,9 +65,13 @@
 - [x] 3C.3 Acceptance Stabilization (reliable complete debate loop; awaiting Operator validation)
 - [x] Operator-gated iterative debate loop (3C.4 — checkpoints, Continue, guidance, Finish, dynamic Desktop stages)
 
+## Phase 3D — Managed provider browser
+
+- [ ] 3D.1 Managed Provider Browser MVP (ChatGPT + DeepSeek internal sessions; awaiting Operator validation)
+
 ## Later
 
-- [ ] Additional provider adapters
+- [ ] Additional managed provider adapters (Qwen, Grok, …)
 - [ ] API transports
 - [ ] Automatic completion detection
 - [ ] More automation after reliability is proven

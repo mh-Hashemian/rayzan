@@ -48,6 +48,8 @@ export interface AgentProgress {
   readonly phasesDone: number;
   readonly phasesTotal: number;
   readonly rounds: readonly AgentRoundProgress[];
+  /** Product-facing provenance — managed internal session vs extension fallback. */
+  readonly sessionMode?: 'managed' | 'extension';
 }
 
 export interface TimelineItem {

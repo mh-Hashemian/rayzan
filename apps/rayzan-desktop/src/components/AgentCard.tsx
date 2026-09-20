@@ -29,6 +29,12 @@ export function AgentCard(input: {
   const status = connectionCopy(input.agent);
   const excluded =
     input.agent.role === 'watcher' && input.agent.enabled === false;
+  const provider = input.agent.provider?.trim();
+  const showProvider =
+    provider !== undefined &&
+    provider.length > 0 &&
+    provider.toLowerCase() !== input.agent.name.toLowerCase();
+
   return (
     <article
       className={excluded ? 'agent-card agent-card-excluded' : 'agent-card'}
@@ -39,41 +45,43 @@ export function AgentCard(input: {
           provider={input.agent.provider}
           size={36}
         />
-        <div>
+        <div className="agent-card-identity">
           <p className="agent-role">{roleLabel(input.agent.role)}</p>
           <h3 className="agent-name">{input.agent.name}</h3>
+          {showProvider ? (
+            <p className="agent-provider">{provider}</p>
+          ) : null}
         </div>
       </div>
-      <p className="agent-provider">
-        Provider: {input.agent.provider ?? input.agent.name}
-      </p>
       <p className={`agent-link ${status.kind}`}>
         <span className="dot" aria-hidden="true" />
         {status.label}
       </p>
-      <div className="agent-card-footer">
-        {input.onChangeCoordinator ? (
-          <button
-            type="button"
-            className="text-btn"
-            onClick={input.onChangeCoordinator}
-          >
-            Change Coordinator
-          </button>
-        ) : null}
-        {input.onToggleParticipation ? (
-          <label className="include-toggle">
-            <input
-              type="checkbox"
-              checked={!excluded}
-              onChange={(event) => {
-                input.onToggleParticipation?.(event.target.checked);
-              }}
-            />
-            In next debate
-          </label>
-        ) : null}
-      </div>
+      {input.onChangeCoordinator || input.onToggleParticipation ? (
+        <div className="agent-card-footer">
+          {input.onChangeCoordinator ? (
+            <button
+              type="button"
+              className="text-btn"
+              onClick={input.onChangeCoordinator}
+            >
+              Change Coordinator
+            </button>
+          ) : null}
+          {input.onToggleParticipation ? (
+            <label className="include-toggle">
+              <input
+                type="checkbox"
+                checked={!excluded}
+                onChange={(event) => {
+                  input.onToggleParticipation?.(event.target.checked);
+                }}
+              />
+              In next debate
+            </label>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }

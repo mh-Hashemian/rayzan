@@ -180,6 +180,11 @@ export async function finishDebate(): Promise<RuntimeDebateState> {
   return postRuntime('/api/session/finish-debate', {});
 }
 
+/** End the active debate without synthesis so a new Decision can start. */
+export async function endDebate(): Promise<RuntimeDebateState> {
+  return postRuntime('/api/session/end-debate', {});
+}
+
 async function postRuntime(
   path: string,
   body: Record<string, unknown>,

@@ -393,7 +393,20 @@ async function processPending(binding: Binding): Promise<void> {
     });
     await adapter.sendPrompt(pending.job.body);
     submittedDeliveryIds.add(deliveryId);
-    await acknowledge(binding.agentId, deliveryId);
+    try {
+      await acknowledge(binding.agentId, deliveryId);
+    } catch (ackError) {
+      const ackMessage =
+        ackError instanceof Error ? ackError.message : String(ackError);
+      // Managed browser may have confirmed first — keep capturing.
+      if (
+        !/already confirmed|already submitted|round already completed|response already submitted|cannot mark a responded/i.test(
+          ackMessage,
+        )
+      ) {
+        throw ackError;
+      }
+    }
     blockedSendId = undefined;
     await reportPresence(binding, {
       phase: 'prompt-submitted',

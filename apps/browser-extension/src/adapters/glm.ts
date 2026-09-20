@@ -56,11 +56,21 @@ export function glmIsGenerating(root?: ParentNode): boolean {
   if (glmStopControl(root) !== undefined) {
     return true;
   }
+  const last = glmAssistantTurns(root).at(-1);
+  // Thinking chain means the model is still working — do not treat streamed
+  // answer fragments as a finished reply.
+  if (
+    last &&
+    last.querySelector(
+      '.thinking-chain-container, [class*="thinking-chain"]',
+    )
+  ) {
+    return true;
+  }
   const send = queryFirst('#send-message-button', root);
   const sendDisabled = Boolean(
     send && 'disabled' in send && (send as { disabled: boolean }).disabled,
   );
-  const last = glmAssistantTurns(root).at(-1);
   return sendDisabled && glmExtract(last).length === 0;
 }
 
@@ -74,7 +84,9 @@ export function glmExtract(turn: Element | undefined): string {
   }
   const cloneElement = clone as Element;
   for (const thinking of Array.from(
-    cloneElement.querySelectorAll('.thinking-chain-container'),
+    cloneElement.querySelectorAll(
+      '.thinking-chain-container, [class*="thinking-chain"], [class*="Thinking"]',
+    ),
   )) {
     thinking.remove();
   }
@@ -83,7 +95,9 @@ export function glmExtract(turn: Element | undefined): string {
 
 export function glmListTurns(root?: ParentNode): AssistantTurn[] {
   return glmAssistantTurns(root).map((element, index) => {
-    const thinking = element.querySelector('.thinking-chain-container');
+    const thinking = element.querySelector(
+      '.thinking-chain-container, [class*="thinking-chain"]',
+    );
     const finalText = glmExtract(element);
     const hasFinalAnswer = finalText.length > 0;
     return {

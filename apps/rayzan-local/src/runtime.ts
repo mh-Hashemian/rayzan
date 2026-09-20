@@ -534,9 +534,9 @@ export class RayzanRuntime {
       throw new Error('Coordinator Round 1 prompt already queued');
     }
     const watchers = this.#watchersForNewDebate();
-    if (watchers.length < 2) {
+    if (watchers.length < 1) {
       throw new Error(
-        'include at least two Watchers in the next debate',
+        'include at least one Watcher in the next debate',
       );
     }
     const coordinator = this.#requireSingleCoordinator();
@@ -672,13 +672,17 @@ export class RayzanRuntime {
     const capture = asCaptureState(input.capture) ?? previous?.capture;
     if (
       phase === 'waiting' &&
-      (previous?.phase === 'error' || capture?.phase === 'failed')
+      capture?.phase === 'failed' &&
+      previous?.phase === 'error'
     ) {
       phase = 'error';
     }
     const error =
       input.error ??
-      (phase === 'sending' || phase === 'captured'
+      (phase === 'sending' ||
+      phase === 'captured' ||
+      phase === 'waiting' ||
+      phase === 'generating'
         ? undefined
         : previous?.error);
     this.#presence.set(agent.id, {
@@ -700,6 +704,14 @@ export class RayzanRuntime {
     });
     if (phase === 'error' && error) {
       this.#lastError = `${agent.name}: ${error}`;
+    } else if (
+      phase === 'captured' ||
+      phase === 'sending' ||
+      (phase === 'waiting' && !error)
+    ) {
+      if (this.#lastError?.startsWith(`${agent.name}:`)) {
+        this.#lastError = undefined;
+      }
     }
     if (
       !this.#freezeRestoredSideEffects &&
@@ -773,6 +785,13 @@ export class RayzanRuntime {
       throw new Error(
         `agent ${agentId} cannot acknowledge delivery ${deliveryId}`,
       );
+    }
+
+    // Managed browser + extension can both ACK the same job. Treat already
+    // delivered/responded as success so the losing racer does not surface a
+    // red "delivery already confirmed" error while the model is still working.
+    if (delivery.status === 'delivered' || delivery.status === 'responded') {
+      return delivery;
     }
 
     const confirmed =
