@@ -85,6 +85,31 @@ export const MOCK_DEBATE_VIEW: DebateWorkspaceView = {
       ],
     },
   ],
+  contributions: [
+    {
+      id: 'qwen-r1',
+      agentId: 'qwen',
+      name: 'Qwen',
+      provider: 'Qwen',
+      roundNumber: 1,
+      prompt: 'Compare SQLite and PostgreSQL for local-first Rayzan.',
+      response: 'Prefer SQLite for the current operator workstation deployment.',
+      status: 'Responded',
+    },
+    {
+      id: 'glm-r1',
+      agentId: 'glm',
+      name: 'GLM',
+      provider: 'GLM',
+      roundNumber: 1,
+      prompt: 'Compare SQLite and PostgreSQL for local-first Rayzan.',
+      response: 'Prefer PostgreSQL if multi-user growth is likely.',
+      status: 'Responded',
+    },
+  ],
+  coordinatorAnswer:
+    'SQLite is the better near-term fit for local-first Rayzan; revisit PostgreSQL if multi-user sync becomes primary.',
+  coordinatorAnswerLabel: 'Current Answer',
   timeline: [
     {
       id: '1',

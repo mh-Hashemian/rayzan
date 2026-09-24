@@ -83,5 +83,8 @@ function statusClass(status: AgentProgress['status']): string {
   if (status === 'Active' || status === 'Thinking') {
     return 'live';
   }
+  if (status === 'Attention') {
+    return 'warn';
+  }
   return 'wait';
 }

@@ -81,9 +81,9 @@ describe('RayzanRuntime Round 1', () => {
     assert.equal(afterAck.roundProgress?.responded, 0);
     assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
 
-    assert.throws(() =>
-      runtime.acknowledgeDelivery(qwen.id, qwenJob.deliveryId),
-    );
+    // Duplicate ACK from the same agent is idempotent (managed + extension race).
+    const again = runtime.acknowledgeDelivery(qwen.id, qwenJob.deliveryId);
+    assert.equal(again.status, 'delivered');
     assert.throws(() =>
       runtime.acknowledgeDelivery(glm.id, qwenJob.deliveryId),
     );

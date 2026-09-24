@@ -61,7 +61,10 @@ export default defineConfig({
             outDir: path.join(root, 'dist-electron'),
             emptyOutDir: false,
             rollupOptions: {
-              external: ['better-sqlite3', 'electron'],
+              // esbuild must load from node_modules as real CJS: its own
+              // lib/main.js uses __filename/__dirname to locate its platform
+              // binary, which does not exist inside this ESM bundle.
+              external: ['better-sqlite3', 'electron', 'esbuild'],
             },
           },
         },

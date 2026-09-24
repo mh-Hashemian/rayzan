@@ -1,17 +1,21 @@
 # Status
 
-Current phase: Phase 3D.1 — Managed Provider Browser MVP (awaiting Operator validation)
+Current phase: Phase 3C.6 — Agentic Coordinator Runtime + Rayzan Action Protocol (awaiting Operator validation)
 
 Completed:
 
-- Initial workspace setup through Phase 3C.4 (see git history / prior STATUS entries)
-- Grok browser adapter + desktop logo; capture premature-JSON / duplicate-submit hardening
+- Initial workspace setup through Phase 3C.5
+- Managed provider browser foundation (3D.1 in progress in parallel)
 
 Currently being worked on:
 
-- 3D.1 Managed Provider Browser MVP — ChatGPT + DeepSeek internal Electron sessions, Settings Connect UI, auto fresh conversations on Start Decision (awaiting Operator Desktop validation)
+- 3C.6 action protocol: dispatch, forward, ask_operator, checkpoint; evidence refs; Desktop ask_operator UX
+- Capture reliability hardening: shared `@rayzan/capture` machine; managed browser uses extension-semantics (new turn + generation end); MutationObserver wake; timers are watchdogs only
 
 Next:
 
-- Operator validates Connect → Start Decision → debate without external tabs
-- Then expand managed adapters to Qwen/Grok
+- Operator validates live Desktop acceptance **without** manual API salvage:
+  DeepSeek→GLM, DeepSeek→GLM→Qwen, parallel Watchers, ask_operator, restart during pending action
+- Continue 3D.1 managed provider validation
+
+Do **not** commit 3C.6 until capture passes the live suite without salvage.

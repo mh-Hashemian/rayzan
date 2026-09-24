@@ -16,7 +16,7 @@ import type {
   ConversationSnapshot,
   PromptSendResult,
 } from './types.js';
-import type { AssistantTurn } from '../capture/types.js';
+import type { AssistantTurn } from '../capture/assistant-turn.js';
 import { liveSnapshotFromTurns, turnIdentity } from '../capture/turns.js';
 
 export function qwenAssistantTurns(root?: ParentNode): Element[] {

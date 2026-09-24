@@ -18,12 +18,19 @@ export {
 export {
   COORDINATOR_COMMAND_PROTOCOL_VERSION,
   COORDINATOR_COMMAND_TYPES,
+  COORDINATOR_ACTION_MODES,
+  CHECKPOINT_RECOMMENDATIONS,
+  type AskOperatorCommand,
+  type CheckpointCommand,
+  type CheckpointRecommendation,
   type CompleteRoundCommand,
+  type CoordinatorActionMode,
   type CoordinatorCommand,
   type CoordinatorCommandBatch,
   type CoordinatorCommandType,
   type DispatchCommand,
   type FinalizeDebateCommand,
+  type ForwardCommand,
 } from './coordinator-command.js';
 export { parseCoordinatorCommandBatch } from './coordinator-command-parser.js';
 export { CoordinatorCommandExecutor } from './coordinator-command-executor.js';
@@ -32,6 +39,7 @@ export {
   type CoordinatorExecutionContext,
 } from './coordinator-execution-context.js';
 export type {
+  CheckpointExecutionResult,
   CompleteRoundExecutionResult,
   CoordinatorCommandExecutionResult,
   CoordinatorExecutionResult,

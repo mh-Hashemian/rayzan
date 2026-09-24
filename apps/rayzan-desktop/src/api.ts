@@ -63,12 +63,20 @@ export interface RuntimeDebateState {
     readonly createdAt: string;
   };
   readonly awaitingOperator: boolean;
+  readonly operatorQuestion?: {
+    readonly debateId: string;
+    readonly roundId: string;
+    readonly roundNumber: number;
+    readonly question: string;
+    readonly createdAt: string;
+  };
   readonly agents: readonly {
     readonly id: string;
     readonly name: string;
     readonly role: string;
     readonly provider?: string;
     readonly phase?: string;
+    readonly error?: string;
     readonly round1Status: string;
   readonly round2Status: string;
   readonly roundStatuses: readonly {
@@ -83,6 +91,15 @@ export interface RuntimeDebateState {
     readonly recipientIds: readonly string[];
     readonly kind: string;
     readonly body: string;
+    readonly roundId?: string;
+  }[];
+  readonly watcherContributions?: readonly {
+    readonly agentId: string;
+    readonly name: string;
+    readonly provider?: string;
+    readonly roundNumber: number;
+    readonly prompt: string;
+    readonly response?: string;
   }[];
   readonly synthesis?: {
     readonly debateId: string;
@@ -93,6 +110,19 @@ export interface RuntimeDebateState {
   readonly synthesisPending: boolean;
   readonly lastError?: string;
   readonly canRetryCoordinatorDispatch?: boolean;
+  readonly coordinatorAction?: {
+    readonly stepIndex: number;
+    readonly pendingDeliveryIds: readonly string[];
+    readonly terminalDeliveryIds?: readonly string[];
+    readonly decisionPending: boolean;
+    readonly latestAction?: {
+      readonly stepIndex: number;
+      readonly action: string;
+      readonly deliveryIds?: readonly string[];
+    };
+    readonly roundStatus?: string;
+    readonly awaitingOperator?: boolean;
+  };
 }
 
 const ORIGIN = 'http://127.0.0.1:8787';
@@ -112,6 +142,8 @@ const STREAM_EVENTS = [
   'DEBATE_CREATED',
   'ROUND_CREATED',
   'ROUND_COMPLETED',
+  'COORDINATOR_ACTION_CREATED',
+  'COORDINATOR_OPERATOR_QUESTION_CREATED',
   'COORDINATOR_CHECKPOINT_CREATED',
   'OPERATOR_INTERVENTION',
   'DEBATE_CONTINUED',
@@ -178,6 +210,12 @@ export async function continueDebate(
 
 export async function finishDebate(): Promise<RuntimeDebateState> {
   return postRuntime('/api/session/finish-debate', {});
+}
+
+export async function answerOperatorQuestion(
+  answer: string,
+): Promise<RuntimeDebateState> {
+  return postRuntime('/api/session/answer-operator-question', { answer });
 }
 
 /** End the active debate without synthesis so a new Decision can start. */

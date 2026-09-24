@@ -1,6 +1,8 @@
 import type { AgentId, DebateId, MessageId, RoundId } from '@rayzan/protocol';
 import type { OutboundDelivery } from '@rayzan/transport';
 
+import type { CheckpointRecommendation } from './coordinator-command.js';
+
 export interface DispatchExecutionResult {
   readonly type: 'dispatch';
   readonly messageId: MessageId;
@@ -9,6 +11,14 @@ export interface DispatchExecutionResult {
   readonly senderId: AgentId;
   readonly recipientIds: readonly AgentId[];
   readonly deliveries: readonly OutboundDelivery[];
+}
+
+export interface CheckpointExecutionResult {
+  readonly type: 'checkpoint';
+  readonly debateId: DebateId;
+  readonly roundId: RoundId;
+  readonly content: string;
+  readonly recommendation: CheckpointRecommendation;
 }
 
 export interface CompleteRoundExecutionResult {
@@ -27,6 +37,7 @@ export interface FinalizeDebateExecutionResult {
 
 export type CoordinatorCommandExecutionResult =
   | DispatchExecutionResult
+  | CheckpointExecutionResult
   | CompleteRoundExecutionResult
   | FinalizeDebateExecutionResult;
 

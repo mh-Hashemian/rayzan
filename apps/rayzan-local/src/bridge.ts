@@ -80,6 +80,16 @@ export async function handleBridgeRequest(
       write(response, 200, runtime.snapshot());
       return true;
     }
+    if (request.method === 'GET' && url.pathname === '/api/debug/providers') {
+      write(response, 200, runtime.debugProviders());
+      return true;
+    }
+    if (request.method === 'POST' && url.pathname === '/api/debug/managed-state') {
+      const body = await readJson(request);
+      runtime.noteManagedDebugState(body);
+      write(response, 200, { ok: true });
+      return true;
+    }
     if (request.method === 'POST' && url.pathname === '/api/presence') {
       const body = await readJson(request);
       runtime.notePresence({
@@ -201,6 +211,15 @@ export async function handleBridgeRequest(
     }
     if (
       request.method === 'POST' &&
+      url.pathname === '/api/session/answer-operator-question'
+    ) {
+      const body = await readJson(request);
+      runtime.answerOperatorQuestion(String(body.answer ?? ''));
+      write(response, 200, runtime.snapshot());
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
       url.pathname === '/api/session/change-coordinator'
     ) {
       const body = await readJson(request);
@@ -245,11 +264,13 @@ export async function handleBridgeRequest(
     if (request.method === 'POST' && responseMatch) {
       const body = await readJson(request);
       const deliveryId = decodeURIComponent(responseMatch[1] ?? '');
-      runtime.submitCapturedResponse(
-        String(body.agentId ?? ''),
-        deliveryId,
-        String(body.body ?? ''),
-      );
+      const agentId = String(body.agentId ?? '');
+      const text = String(body.body ?? '');
+      if (body.salvage === true || body.provenance === 'operator-visible-response') {
+        runtime.salvageVisibleResponse(agentId, deliveryId, text);
+      } else {
+        runtime.submitCapturedResponse(agentId, deliveryId, text);
+      }
       write(response, 200, runtime.snapshot());
       return true;
     }

@@ -6,21 +6,18 @@ import {
   type CaptureMachineState,
 } from './evaluate.js';
 import type { CaptureObservation, CaptureSnapshot } from './types.js';
-import {
-  GENERATION_TIMEOUT_MS,
-  NEW_TURN_TIMEOUT_MS,
-  STABILITY_WINDOW_MS,
-} from './types.js';
+import { GENERATION_WATCHDOG_MS, NEW_TURN_WATCHDOG_MS } from './types.js';
 
 export async function runCapture(input: {
   readonly snapshot: CaptureSnapshot;
-  readonly observe: () => CaptureObservation;
+  readonly observe: () => CaptureObservation | Promise<CaptureObservation>;
+  /** Prefer mutation-driven wake; short delay is only a fallback tick. */
+  readonly waitForChange?: (timeoutMs: number) => Promise<void>;
   readonly onPhase?: (evaluation: CaptureEvaluation) => void;
   readonly now?: () => number;
   readonly waitMs?: (ms: number) => Promise<void>;
   readonly newTurnTimeoutMs?: number;
   readonly generationTimeoutMs?: number;
-  readonly stabilityWindowMs?: number;
 }): Promise<string> {
   const now = input.now ?? Date.now;
   const waitMs =
@@ -36,14 +33,15 @@ export async function runCapture(input: {
   });
 
   for (;;) {
+    const observation = await input.observe();
     const evaluation = evaluateCapture({
       snapshot: input.snapshot,
-      observation: input.observe(),
+      observation,
       state,
       now: now(),
-      newTurnTimeoutMs: input.newTurnTimeoutMs ?? NEW_TURN_TIMEOUT_MS,
-      generationTimeoutMs: input.generationTimeoutMs ?? GENERATION_TIMEOUT_MS,
-      stabilityWindowMs: input.stabilityWindowMs ?? STABILITY_WINDOW_MS,
+      newTurnTimeoutMs: input.newTurnTimeoutMs ?? NEW_TURN_WATCHDOG_MS,
+      generationTimeoutMs:
+        input.generationTimeoutMs ?? GENERATION_WATCHDOG_MS,
     });
     state = {
       phase: evaluation.phase,
@@ -51,6 +49,9 @@ export async function runCapture(input: {
       lastText: evaluation.lastText,
       lastChangeAt: evaluation.lastChangeAt,
       startedAt: state.startedAt,
+      sawGenerating: evaluation.sawGenerating,
+      generationStartedAt: evaluation.generationStartedAt,
+      generationEndedAt: evaluation.generationEndedAt,
     };
     if (evaluation.phase !== lastPhase) {
       input.onPhase?.(evaluation);
@@ -70,6 +71,10 @@ export async function runCapture(input: {
         evaluation.failure,
       );
     }
-    await waitMs(80);
+    if (input.waitForChange) {
+      await input.waitForChange(250);
+    } else {
+      await waitMs(80);
+    }
   }
 }

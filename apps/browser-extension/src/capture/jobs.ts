@@ -1,4 +1,8 @@
-import type { CaptureJob, CapturePhase, CaptureReport } from './types.js';
+import type { CapturePhase, CaptureReport } from '@rayzan/capture';
+
+import type { CaptureJob } from './job-types.js';
+
+export type { CaptureJob } from './job-types.js';
 
 export function isActiveCapturePhase(phase: CapturePhase): boolean {
   return phase !== 'idle' && phase !== 'captured' && phase !== 'failed';

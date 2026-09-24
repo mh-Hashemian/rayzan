@@ -31,6 +31,10 @@ importers:
         version: 8.70.0(eslint@10.10.0)(typescript@5.9.3)
 
   apps/browser-extension:
+    dependencies:
+      '@rayzan/capture':
+        specifier: workspace:*
+        version: link:../../packages/capture
     devDependencies:
       '@types/chrome':
         specifier: ^0.0.287
@@ -47,9 +51,15 @@ importers:
 
   apps/rayzan-desktop:
     dependencies:
+      '@rayzan/capture':
+        specifier: workspace:*
+        version: link:../../packages/capture
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1
+      esbuild:
+        specifier: ^0.25.10
+        version: 0.25.12
     devDependencies:
       '@electron/rebuild':
         specifier: ^3.7.2
@@ -81,6 +91,9 @@ importers:
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -112,6 +125,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport
     devDependencies:
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+
+  packages/capture:
+    devDependencies:
+      linkedom:
+        specifier: ^0.18.12
+        version: 0.18.13
       tsx:
         specifier: ^4.23.13
         version: 4.23.13

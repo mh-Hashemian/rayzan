@@ -57,10 +57,77 @@
         padding-top: 0.5rem;
         border-top: 1px solid #ddd;
       }
+      .obs-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 0.75rem;
+      }
+      .obs-card {
+        border: 1px solid #ccc;
+        padding: 0.5rem 0.75rem;
+      }
+      .obs-card h3 {
+        margin: 0 0 0.4rem 0;
+        font-size: 1rem;
+      }
+      .obs-table {
+        margin-bottom: 0.4rem;
+      }
+      .obs-table td,
+      .obs-table th {
+        padding: 0.15rem 0.4rem;
+        font-size: 0.85rem;
+      }
+      .obs-table th {
+        width: 10rem;
+        color: #555;
+        font-weight: normal;
+      }
+      .obs-pipe td,
+      .obs-pipe th {
+        font-size: 0.85rem;
+      }
+      .obs-pipe .t {
+        font-family: monospace;
+        white-space: nowrap;
+      }
+      .warn {
+        color: #a05a00;
+      }
+      .mute {
+        color: #777;
+      }
+      .obs-details summary {
+        cursor: pointer;
+        font-size: 0.85rem;
+        color: #555;
+      }
+      .obs-details pre {
+        font-size: 0.78rem;
+        max-height: 16rem;
+        overflow: auto;
+      }
+      .obs-meta {
+        font-size: 0.85rem;
+        color: #555;
+      }
     </style>
   </head>
   <body>
     <h1>Rayzan — Browser MVP</h1>
+    <section>
+      <h2>PROVIDER OBSERVATORY (DEBUG)</h2>
+      <p class="obs-meta" id="obs-meta">
+        Live provider/pipeline debug state from /api/debug/providers. Ephemeral
+        browser state comes from the managed browser host; delivery/action
+        state comes from the runtime. No fabricated or timer-derived states.
+      </p>
+      <div id="obs-cards" class="obs-grid">(loading…)</div>
+      <h3>Current interaction pipeline</h3>
+      <div id="obs-pipeline">(no active provider interaction)</div>
+      <h3>Recent transitions</h3>
+      <pre id="obs-transitions">(none yet)</pre>
+    </section>
     <section>
       <h2>Agents</h2>
       <p>
@@ -128,6 +195,10 @@ Waiting for agents and Create Round 1 / Start live debate.</pre>
     <section>
       <h2>Round 1 Responses</h2>
       <pre id="round1-responses">(none yet)</pre>
+    </section>
+    <section>
+      <h2>Coordinator Action Loop (3C.6)</h2>
+      <pre id="coordinator-action">(idle)</pre>
     </section>
     <section>
       <h2>Coordinator — Round 2 Plan</h2>
@@ -559,6 +630,35 @@ Exposures:
               .join('\n\n')
           : '(none yet)';
 
+        const action = state.coordinatorAction;
+        const ask = state.operatorQuestion;
+        $('coordinator-action').textContent = [
+          ask
+            ? [
+                'ASK_OPERATOR PENDING',
+                `question: ${ask.question}`,
+                `round: ${ask.roundNumber}`,
+              ].join('\n')
+            : null,
+          action
+            ? [
+                `stepIndex: ${action.stepIndex}`,
+                `decisionPending: ${action.decisionPending}`,
+                `awaitingOperator: ${action.awaitingOperator ?? state.awaitingOperator}`,
+                `roundStatus: ${action.roundStatus ?? '(n/a)'}`,
+                `pendingDeliveryIds: ${(action.pendingDeliveryIds || []).join(', ') || '(none)'}`,
+                `terminalDeliveryIds: ${(action.terminalDeliveryIds || []).join(', ') || '(none)'}`,
+                `latestAction: ${
+                  action.latestAction
+                    ? `${action.latestAction.action} @ step ${action.latestAction.stepIndex}`
+                    : '(none)'
+                }`,
+              ].join('\n')
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n\n') || '(idle — no active consultation step)';
+
         const plan = state.coordinatorPlan;
         if (plan && plan.parsed) {
           $('coordinator-plan').textContent = [
@@ -773,6 +873,209 @@ Exposures:
       }
 
       refresh();
+
+      // ---- Provider Observatory (/api/debug/providers) ----
+      const OBS_OK = new Set([
+        'connected', 'ready', 'captured', 'valid', 'accepted', 'responded',
+        'detected', 'ended', 'completed',
+      ]);
+      const OBS_WARN = new Set([
+        'restoring', 'connecting', 'loading', 'navigating', 'hidden',
+        'pending', 'sending', 'submitting', 'preparing', 'composer_ready',
+        'waiting', 'waiting_for_new', 'awaiting_response', 'submitted',
+        'reading', 'parsing', 'active',
+      ]);
+      const OBS_ERROR = new Set([
+        'logged_out', 'error', 'failed', 'invalid', 'in_doubt',
+      ]);
+
+      function obsClass(state) {
+        if (OBS_OK.has(state)) return 'ok';
+        if (OBS_ERROR.has(state)) return 'error';
+        if (OBS_WARN.has(state)) return 'warn';
+        return 'mute';
+      }
+
+      function obsLabel(state) {
+        return String(state ?? 'unknown').replaceAll('_', ' ').toUpperCase();
+      }
+
+      function obsTime(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '?';
+        return (
+          d.toLocaleTimeString('en-GB', { hour12: false }) +
+          '.' + String(d.getMilliseconds()).padStart(3, '0')
+        );
+      }
+
+      function obsRow(name, state, extra) {
+        const cls = obsClass(state);
+        const label = obsLabel(state);
+        return (
+          `<tr><th>${escapeHtml(name)}</th>` +
+          `<td class="${cls}">${escapeHtml(label)}${extra ? ' ' + extra : ''}</td></tr>`
+        );
+      }
+
+      function obsCard(p) {
+        const deliveryExtra = p.delivery.deliveryId
+          ? `<small> ${escapeHtml(p.delivery.deliveryId)}</small>`
+          : '';
+        const captureExtra = p.capture.reason
+          ? `<small> ${escapeHtml(p.capture.reason)}</small>`
+          : '';
+        const protocolExtra = p.coordinatorProtocol.error
+          ? `<div class="error">${escapeHtml(p.coordinatorProtocol.error)}</div>`
+          : p.coordinatorProtocol.stepIndex !== undefined
+            ? `<small> step ${escapeHtml(String(p.coordinatorProtocol.stepIndex))}${p.coordinatorProtocol.action ? ' · ' + escapeHtml(p.coordinatorProtocol.action) : ''}</small>`
+            : '';
+        const sendExtra = p.send.error
+          ? `<div class="error">${escapeHtml(p.send.error)}</div>`
+          : '';
+        const lastError = p.lastError
+          ? `<div class="error">${escapeHtml(p.lastError)}</div>`
+          : '<span class="mute">—</span>';
+        const details = [];
+        if (p.details.url) details.push('page url: ' + p.details.url);
+        if (p.details.probeUrl && p.details.probeUrl !== p.details.url)
+          details.push('probe url: ' + p.details.probeUrl);
+        if (p.details.windowVisible !== undefined)
+          details.push('window: ' + (p.details.windowVisible ? 'visible' : 'hidden'));
+        if (p.details.restoreActive) details.push('restore in progress');
+        if (p.details.sendTraceEnabled) details.push('send trace enabled');
+        if (p.details.hasComposer !== undefined)
+          details.push('composer: ' + (p.details.hasComposer ? 'found' : 'not found'));
+        if (p.details.hasSend !== undefined)
+          details.push('send button: ' + (p.details.hasSend ? 'present' : 'absent'));
+        if (p.details.probeGenerating !== undefined)
+          details.push('probe generating: ' + p.details.probeGenerating);
+        if (p.delivery.deliveryId) details.push('delivery: ' + p.delivery.deliveryId);
+        if (p.capture.textLength !== undefined)
+          details.push('captured text length: ' + p.capture.textLength);
+        if (p.capture.preSendTurnCount !== undefined)
+          details.push('pre-send assistant turns: ' + p.capture.preSendTurnCount);
+        if (p.capture.trackedIdentity)
+          details.push('tracked turn: ' + p.capture.trackedIdentity);
+        if (p.capture.generationEndedAt)
+          details.push('generation ended at: ' + obsTime(new Date(p.capture.generationEndedAt).toISOString()));
+        if (p.capture.capturedAt)
+          details.push('captured at: ' + obsTime(new Date(p.capture.capturedAt).toISOString()));
+        if (p.capture.domChangedAfterTerminal !== undefined)
+          details.push('DOM changed after terminal: ' + p.capture.domChangedAfterTerminal);
+        if (p.capture.domChangedAfterCapture !== undefined)
+          details.push('DOM changed after capture: ' + p.capture.domChangedAfterCapture);
+        details.push('transport: ' + (p.managed ? 'managed-browser' : 'extension/unknown'));
+        if (p.presencePhase) details.push('presence phase: ' + p.presencePhase);
+        const transitions = (p.transitions || [])
+          .map((t) => `${obsTime(t.at)}  ${t.label}${t.detail ? '  — ' + t.detail : ''}`)
+          .join('\n');
+        return `<div class="obs-card">
+          <h3>${escapeHtml(p.label)}${p.role ? ` <small class="mute">(${escapeHtml(p.role)})</small>` : ''}</h3>
+          <table class="obs-table">
+            ${obsRow('Session', p.session.state, p.session.detail ? `<small> ${escapeHtml(p.session.detail)}</small>` : '')}
+            ${obsRow('Browser/Page', p.page.state)}
+            ${obsRow('Conversation', p.conversation.state, p.conversation.conversationId ? `<small> ${escapeHtml(p.conversation.conversationId)}</small>` : '')}
+            ${obsRow('Delivery', p.delivery.state, deliveryExtra)}
+            ${obsRow('Send', p.send.state, sendExtra)}
+            ${obsRow('Assistant turn', p.assistantTurn.state)}
+            ${obsRow('Generation', p.generation.state)}
+            ${obsRow('Capture', p.capture.state, captureExtra)}
+            ${obsRow('Coordinator protocol', p.coordinatorProtocol.state, protocolExtra)}
+            <tr><th>Last change</th><td class="mute">${escapeHtml(p.lastChangedAt ? obsTime(p.lastChangedAt) : '—')}</td></tr>
+            <tr><th>Last error</th><td>${lastError}</td></tr>
+          </table>
+          <details class="obs-details">
+            <summary>View details</summary>
+            <pre>${escapeHtml(details.join('\n'))}</pre>
+            <pre>${escapeHtml(transitions || '(no transitions yet)')}</pre>
+          </details>
+        </div>`;
+      }
+
+      function obsPipelineHtml(p) {
+        const rows = (p.pipeline || [])
+          .map((stage) => {
+            const cls = obsClass(stage.state);
+            return (
+              `<tr><td>${escapeHtml(stage.stage)}</td>` +
+              `<td class="${cls}">${obsLabel(stage.state)}</td>` +
+              `<td class="t ${cls}">${escapeHtml(stage.at ? obsTime(stage.at) : '—')}</td>` +
+              `<td>${stage.detail ? escapeHtml(stage.detail) : ''}</td></tr>`
+            );
+          })
+          .join('');
+        return `<table class="obs-pipe">
+          <tr><th>Stage</th><th>State</th><th>Time</th><th>Detail</th></tr>
+          ${rows}
+        </table>`;
+      }
+
+      function renderDebug(data) {
+        const active = data.activeCoordinatorAction;
+        const actionLine = active
+          ? [
+              `Coordinator action: step ${active.stepIndex}` +
+                (active.action ? ` · ${active.action}` : '') +
+                (active.decisionPending ? ' · decision pending' : '') +
+                (active.awaitingOperator ? ' · awaiting operator' : ''),
+              `pending deliveries: ${(active.pendingDeliveryIds || []).join(', ') || '(none)'}`,
+              ...(active.operatorQuestion
+                ? [`ask_operator: ${active.operatorQuestion.question}`]
+                : []),
+            ].join('\n')
+          : 'Coordinator action: (idle — no active consultation step)';
+        const providers = data.providers || [];
+        $('obs-cards').innerHTML = providers.length
+          ? providers.map(obsCard).join('')
+          : '(no providers)';
+        const activeProvider =
+          providers.find((p) =>
+            [
+              'pending', 'sending', 'submitted', 'awaiting_response',
+              'in_doubt', 'failed',
+            ].includes(p.delivery.state),
+          ) ||
+          providers.find((p) =>
+            ['preparing', 'composer_ready', 'submitting'].includes(p.send.state),
+          ) ||
+          providers.find((p) =>
+            (p.pipeline || []).some(
+              (s) => s.state === 'active' || s.state === 'failed',
+            ),
+          );
+        $('obs-pipeline').innerHTML = activeProvider
+          ? `<p class="obs-meta">${escapeHtml(activeProvider.label)} / delivery ${escapeHtml(activeProvider.delivery.deliveryId ?? '(none)')}</p>` +
+            obsPipelineHtml(activeProvider)
+          : '<p class="mute">(no active provider interaction)</p>';
+        $('obs-transitions').textContent =
+          `Coordinator: ${actionLine}\n\n` +
+          (data.restoring ? 'Managed restore: IN PROGRESS\n' : '') +
+          ((data.recentTransitions || []).length
+            ? (data.recentTransitions || [])
+                .slice(0, 30)
+                .map(
+                  (t) =>
+                    `${obsTime(t.at)}  [${escapeHtml(t.agentId ?? t.source)}] ${t.label}${t.detail ? ' — ' + escapeHtml(t.detail) : ''}`,
+                )
+                .join('\n')
+            : '(none yet)');
+        $('obs-meta').textContent =
+          `observed at ${obsTime(data.now)} · managed restore: ${data.restoring ? 'ACTIVE' : 'idle'}` +
+          ` · send trace: ${data.sendTraceEnabled ? 'ON' : 'off'} · providers: ${providers.length}`;
+      }
+
+      async function refreshDebug() {
+        try {
+          renderDebug(await api('/api/debug/providers'));
+        } catch (error) {
+          $('obs-meta').textContent = 'observatory unavailable: ' + error.message;
+        }
+      }
+
+      setInterval(refreshDebug, 1000);
+      refreshDebug();
     </script>
   </body>
 </html>

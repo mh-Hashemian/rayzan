@@ -27,11 +27,15 @@ External side effects use request → terminal (`confirmed` or `failed`). A `REQ
 | `PROMPT_DISPATCH_CONFIRMED` | Browser/external send succeeded | 1 | `deliveryId`, `recipientId`, `action: prompt-dispatch` | `PROMPT_DISPATCH_REQUESTED` | `delivery:{id}` | none | **yes** (terminal) |
 | `PROMPT_DISPATCH_FAILED` | Browser/external send failed | 1 | `deliveryId`, `recipientId`, `action: prompt-dispatch`, `reason` | `PROMPT_DISPATCH_REQUESTED` | `delivery:{id}` | none; not retried | **yes** (terminal) |
 | `DELIVERY_CONFIRMED` | Mark delivery delivered | 1 | `deliveryId`, `messageId`, `recipientId` | `PROMPT_DISPATCH_REQUESTED` | `delivery:{id}` | set status delivered | no |
+| `DELIVERY_QUARANTINED` | Exclude delivery from work queues without deleting history | 1 | `deliveryId`, `reason` (`IN_DOUBT`/`SUPERSEDED`/`FAILED`), optional `detail`, `status` | delivery lifecycle | `delivery:{id}` | freeze out of pending/awaiting | no |
 | `EXPOSURE_CREATED` | Record exposure after confirm | 1 | `exposureId`, `messageId`, `agentId`, `referencedMessageIds` | `DELIVERY_CONFIRMED` | `delivery:{id}` | record exposure | no |
 | `CAPTURE_REQUESTED` | Browser/external capture requested | 1 | `deliveryId`, `recipientId`, `action: capture` | `PROMPT_DISPATCH_CONFIRMED` | `delivery:{id}` | none; used for IN_DOUBT | **yes** (request) |
 | `RESPONSE_CAPTURED` | Capture succeeded | 1 | `messageId`, `deliveryId`, `senderId` | response `MESSAGE_CREATED` | `delivery:{id}` | set status responded | **yes** (terminal) |
 | `CAPTURE_FAILED` | Capture failed | 1 | `deliveryId`, `recipientId`, `action: capture`, `reason` | `CAPTURE_REQUESTED` | `delivery:{id}` | none; not retried | **yes** (terminal) |
-| `ROUND_COMPLETED` | Close a round | 1 | `number`, `status` | last `RESPONSE_CAPTURED` in that round | `round:{id}` | restore completed | no |
+| `CAPTURE_SALVAGED_BY_OPERATOR` | Operator/debug used a visible response when automatic capture failed | 1 | `deliveryId`, `bodyLength`, `provenance` | attention / failed capture | `delivery:{id}` | precedes normal `RESPONSE_CAPTURED`; not happy-path proof | no |
+| `ROUND_COMPLETED` | Close a round (checkpoint-driven in 3C.6; not merely first Watcher batch done) | 1 | `number`, `status` | `COORDINATOR_ACTION_CREATED` (checkpoint) or last collected responses | `round:{id}` | restore completed | no |
+| `COORDINATOR_ACTION_CREATED` | Record a Coordinator action step (`dispatch` / `forward` / `ask_operator` / `checkpoint`) | 1 | `stepIndex`, `action`, `commands[]`, optional `deliveryIds` / `recommendation` / `question` | prior response/action | `round:{id}` | restore action-loop step flags | no |
+| `COORDINATOR_OPERATOR_QUESTION_CREATED` | Persist ask_operator clarification | 1 | `question`, `createdAt` | `COORDINATOR_ACTION_CREATED` | `round:{id}` | restore Operator question UI | no |
 | `COORDINATOR_CHECKPOINT_CREATED` | Store Coordinator's post-round assessment | 1 | `body`, `recommendation: finish\|continue`, `createdAt` | `ROUND_COMPLETED` | `round:{id}` | restore checkpoint artifact | no |
 | `OPERATOR_INTERVENTION` | Preserve free-form guidance for the next round | 1 | `guidance` | checkpoint | `round:{id}` | retained in event history | no |
 | `DEBATE_CONTINUED` | Authorize one more round | 1 | `fromRoundId` | checkpoint | `round:{id}` | gate derivation | no |

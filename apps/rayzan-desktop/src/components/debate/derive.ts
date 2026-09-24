@@ -9,6 +9,7 @@ import type {
   StageStatus,
   TimelineItem,
   TranscriptMessage,
+  WatcherContributionView,
 } from './types.js';
 
 export function deriveDebateView(
@@ -42,6 +43,13 @@ export function deriveDebateView(
     awaitingOperator: state.awaitingOperator,
     synthesisPending: state.synthesisPending,
   });
+  const contributions = deriveContributions(state);
+  const coordinatorAnswer = state.synthesis?.body ?? state.checkpoint?.body;
+  const coordinatorAnswerLabel = state.synthesis
+    ? 'Final Answer'
+    : state.checkpoint
+      ? 'Current Answer'
+      : undefined;
 
   return {
     title,
@@ -58,6 +66,13 @@ export function deriveDebateView(
       synthesisPending: state.synthesisPending,
     }),
     agents,
+    contributions,
+    ...(coordinatorAnswer
+      ? {
+          coordinatorAnswer,
+          coordinatorAnswerLabel,
+        }
+      : {}),
     timeline: deriveTimeline(state),
     insights: {
       agreement: [],
@@ -76,11 +91,37 @@ export function deriveDebateView(
         }
       : {}),
     awaitingOperator: state.awaitingOperator,
+    ...(state.operatorQuestion
+      ? {
+          operatorQuestion: {
+            roundNumber: state.operatorQuestion.roundNumber,
+            question: state.operatorQuestion.question,
+          },
+        }
+      : {}),
     ...(state.lastError ? { lastError: state.lastError } : {}),
     ...(state.canRetryCoordinatorDispatch
       ? { canRetryCoordinatorDispatch: true }
       : {}),
   };
+}
+
+function deriveContributions(
+  state: RuntimeDebateState,
+): readonly WatcherContributionView[] {
+  if (state.watcherContributions && state.watcherContributions.length > 0) {
+    return state.watcherContributions.map((item, index) => ({
+      id: `${item.agentId}-r${item.roundNumber}-${index}`,
+      agentId: item.agentId,
+      name: item.name,
+      ...(item.provider ? { provider: item.provider } : {}),
+      roundNumber: item.roundNumber,
+      prompt: item.prompt,
+      ...(item.response ? { response: item.response } : {}),
+      status: item.response ? 'Responded' : 'Waiting',
+    }));
+  }
+  return [];
 }
 
 function subtitleFromTopic(
@@ -273,7 +314,9 @@ function deriveCoordinator(
     (item) => item.role === 'watcher' && item.enabled && item.round1Status !== 'idle',
   );
   const coordinatorWorking =
-    agent.phase === 'sending' || agent.phase === 'generating';
+    agent.phase === 'sending' ||
+    agent.phase === 'generating' ||
+    agent.phase === 'capturing';
   const completedRounds = state.rounds.filter(
     (round) => round.status === 'completed',
   ).length;
@@ -285,6 +328,21 @@ function deriveCoordinator(
   if (hasSynthesis) {
     status = 'Completed';
     summary = 'Final synthesis stored';
+  } else if (agent.phase === 'attention' || agent.phase === 'error') {
+    status = 'Attention';
+    summary =
+      agent.error ?? 'Delivery failed — Operator recovery required';
+  } else if (agent.phase === 'generating') {
+    status = 'Thinking';
+    const step = state.coordinatorAction?.stepIndex ?? 0;
+    summary =
+      step > 0 ? 'Reviewing Watcher results…' : 'Choosing next consultation…';
+  } else if (agent.phase === 'capturing') {
+    status = 'Capturing';
+    summary = 'Reading response…';
+  } else if (state.operatorQuestion) {
+    status = 'Awaiting Operator';
+    summary = 'Needs your input to continue';
   } else if (state.awaitingOperator) {
     status = 'Awaiting Operator';
     summary = 'Checkpoint ready for your decision';
@@ -293,17 +351,24 @@ function deriveCoordinator(
     summary = coordinatorWorking
       ? 'Preparing final synthesis'
       : 'Final synthesis queued';
-  } else if (coordinatorWorking) {
+  } else if (
+    state.coordinatorAction?.pendingDeliveryIds?.length &&
+    !state.coordinatorAction.decisionPending &&
+    !coordinatorWorking
+  ) {
+    // Action JSON already captured; Watchers are working.
+    status = 'Waiting';
+    summary = 'Waiting for Watcher responses';
+  } else if (state.coordinatorAction?.decisionPending || coordinatorWorking) {
     status = 'Thinking';
-    const activeRound = state.rounds.find(
-      (round) => round.status === 'active' || round.status === 'collecting',
-    );
-    if (activeRound && activeRound.number > 1) {
-      summary = `Preparing Round ${activeRound.number} challenges`;
-    } else if (!framingDone) {
-      summary = 'Framing the Operator question';
+    const step = state.coordinatorAction?.stepIndex ?? 0;
+    const latest = state.coordinatorAction?.latestAction?.action;
+    if (step > 0 && latest !== 'checkpoint') {
+      summary = 'Reviewing Watcher results…';
+    } else if (step > 0) {
+      summary = 'Preparing checkpoint…';
     } else {
-      summary = 'Working';
+      summary = 'Choosing next consultation…';
     }
   } else if (framingDone) {
     status = 'Waiting';
@@ -351,6 +416,20 @@ function deriveWatcher(
   if (state.synthesis) {
     status = 'Completed';
     summary = 'Participation complete';
+  } else if (agent.phase === 'attention' || agent.phase === 'error') {
+    status = 'Attention';
+    summary =
+      agent.error ?? 'Delivery failed — Operator recovery required';
+  } else if (agent.phase === 'generating') {
+    status = 'Thinking';
+    const current = rounds.at(-1)?.number ?? 1;
+    summary = `Working on Round ${current} analysis`;
+  } else if (agent.phase === 'capturing') {
+    status = 'Capturing';
+    summary = 'Reading response…';
+  } else if (agent.phase === 'sending') {
+    status = 'Active';
+    summary = 'Sending prompt…';
   } else if (state.awaitingOperator) {
     status = 'Responded';
     summary = 'Round participation complete';
@@ -364,9 +443,9 @@ function deriveWatcher(
     isWorkingStatus(agent.roundStatuses.at(-1)?.status ?? 'idle') ||
     isBusyPhase(agent.phase ?? 'idle', agent.roundStatuses.at(-1)?.status ?? 'idle')
   ) {
-    status = 'Thinking';
+    status = 'Active';
     const current = rounds.at(-1)?.number ?? 1;
-    summary = `Working on Round ${current} analysis`;
+    summary = `Active on Round ${current}`;
   }
 
   return {
@@ -392,10 +471,19 @@ function isWorkingStatus(status: string): boolean {
 }
 
 function isBusyPhase(phase: string, roundStatus: string): boolean {
+  // Live presence wins over a stale round delivery status (e.g. prior hop
+  // already responded while a new step is still generating).
+  if (
+    phase === 'sending' ||
+    phase === 'generating' ||
+    phase === 'capturing'
+  ) {
+    return true;
+  }
   if (roundStatus === 'responded' || roundStatus === 'failed' || roundStatus === 'idle') {
     return false;
   }
-  return phase === 'sending' || phase === 'generating' || phase === 'waiting';
+  return phase === 'waiting';
 }
 
 function roundLabel(status: string): string {

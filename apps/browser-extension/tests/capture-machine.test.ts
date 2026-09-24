@@ -178,7 +178,7 @@ describe('capture state machine', () => {
     assert.equal(evaluation.phase, 'generating');
   });
 
-  it('waits through a final mutation after generation ends', () => {
+  it('captures immediately when generation ends (no stability timer)', () => {
     const almost = turnFrom('<div>final!</div>', {
       identity: 'idx:0',
       finalText: 'final!',
@@ -187,7 +187,6 @@ describe('capture state machine', () => {
       identities: [],
       assistantTurnCount: 0,
       lastIncomplete: false,
-      elements: new Set(),
     };
     const evaluation = evaluateCapture({
       snapshot,
@@ -197,14 +196,15 @@ describe('capture state machine', () => {
         trackedIdentity: 'idx:0',
         lastText: 'final',
         lastChangeAt: 0,
+        sawGenerating: true,
       },
       now: 500,
-      stabilityWindowMs: 2000,
     });
-    assert.equal(evaluation.phase, 'stabilizing');
+    assert.equal(evaluation.phase, 'captured');
+    assert.equal(evaluation.text, 'final!');
   });
 
-  it('submits exactly once after final text is stable', async () => {
+  it('submits exactly once after generation ends', async () => {
     const old = turnFrom('<div>old</div>', { identity: 'idx:0' });
     const next = turnFrom('<div>stable answer</div>', { identity: 'idx:1' });
     const snapshot: CaptureSnapshot = {
@@ -212,7 +212,6 @@ describe('capture state machine', () => {
       assistantTurnCount: 1,
       lastAssistantText: 'old',
       lastIncomplete: false,
-      elements: new Set([old.element]),
     };
     let now = 0;
     const text = await runCapture({
@@ -225,7 +224,6 @@ describe('capture state machine', () => {
       waitMs: async (ms) => {
         now += ms;
       },
-      stabilityWindowMs: 200,
       newTurnTimeoutMs: 5000,
       generationTimeoutMs: 5000,
     });
@@ -348,7 +346,7 @@ describe('capture state machine', () => {
     assert.equal(evaluation.failure, 'new-turn-timeout');
   });
 
-  it('holds capture while assistant text looks like incomplete JSON', () => {
+  it('captures when generation ended even if text looks like incomplete JSON', () => {
     const partial = turnFrom('<div>{</div>', {
       identity: 'idx:1',
       finalText: '{',
@@ -366,32 +364,11 @@ describe('capture state machine', () => {
         trackedIdentity: 'idx:1',
         lastText: '{',
         lastChangeAt: 0,
+        sawGenerating: true,
       },
       now: 5_000,
-      stabilityWindowMs: 2_000,
     });
-    assert.equal(early.phase, 'generating');
-    assert.equal(early.failure, undefined);
-
-    const completeText =
-      '{"version":1,"commands":[{"type":"dispatch","messageId":"x","debateId":"d","recipients":{"type":"round-watchers"},"kind":"brief","body":"hi","referencedMessageIds":[]}]}';
-    const complete = turnFrom('<div>done</div>', {
-      identity: 'idx:1',
-      finalText: completeText,
-    });
-    const done = evaluateCapture({
-      snapshot,
-      observation: { turns: [complete], generating: false },
-      state: {
-        ...initialCaptureState(0),
-        trackedIdentity: 'idx:1',
-        lastText: completeText,
-        lastChangeAt: 0,
-      },
-      now: 5_000,
-      stabilityWindowMs: 2_000,
-    });
-    assert.equal(done.phase, 'captured');
-    assert.equal(done.text, completeText);
+    assert.equal(early.phase, 'captured');
+    assert.equal(early.text, '{');
   });
 });

@@ -305,13 +305,15 @@ export class RoundWorkflow {
       const deliveryIds = execution.deliveries
         .filter((delivery) => delivery.recipientId === agentId)
         .map((delivery) => delivery.id);
+      // Roster members with no dispatch in this round are not expected to respond.
+      // Selective Coordinator actions may contact only a subset of Watchers.
       const delivered =
-        deliveryIds.length > 0 &&
+        deliveryIds.length === 0 ||
         deliveryIds.every(
           (id) => execution.confirmed.has(id) || execution.responded.has(id),
         );
       const responded =
-        deliveryIds.length > 0 &&
+        deliveryIds.length === 0 ||
         deliveryIds.every((id) => execution.responded.has(id));
 
       return Object.freeze({
@@ -322,17 +324,19 @@ export class RoundWorkflow {
       });
     });
 
-    const expected = participants.length;
-    const delivered = participants.filter(
+    const contacted = participants.filter(
+      (participant) => participant.deliveryIds.length > 0,
+    );
+    const expected = contacted.length;
+    const delivered = contacted.filter(
       (participant) => participant.delivered,
     ).length;
-    const responded = participants.filter(
+    const responded = contacted.filter(
       (participant) => participant.responded,
     ).length;
     const remaining = expected - responded;
-    const complete =
-      remaining === 0 &&
-      participants.every((participant) => participant.responded);
+    // Complete when every contacted Watcher has responded (or nobody was contacted yet).
+    const complete = remaining === 0;
 
     return Object.freeze({
       roundId,

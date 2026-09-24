@@ -13,11 +13,13 @@ import {
 
 import type {
   CompleteRoundCommand,
+  CheckpointCommand,
   CoordinatorCommandBatch,
   DispatchCommand,
 } from './coordinator-command.js';
 import type { CoordinatorExecutionContext } from './coordinator-execution-context.js';
 import type {
+  CheckpointExecutionResult,
   CompleteRoundExecutionResult,
   CoordinatorCommandExecutionResult,
   CoordinatorExecutionResult,
@@ -57,6 +59,14 @@ export class CoordinatorCommandExecutor {
         results.push(this.#executeDispatch(coordinator, command));
         continue;
       }
+      if (command.type === 'forward' || command.type === 'ask_operator') {
+        // Live consultation executes these in RayzanRuntime (evidence bind + UX).
+        continue;
+      }
+      if (command.type === 'checkpoint') {
+        results.push(this.#executeCheckpoint(debate.id, command));
+        continue;
+      }
       if (command.type === 'complete-round') {
         results.push(this.#executeCompleteRound(debate.id, command));
         continue;
@@ -75,7 +85,11 @@ export class CoordinatorCommandExecutor {
     }
 
     for (const command of batch.commands) {
-      if (command.debateId !== debate.id) {
+      if (
+        'debateId' in command &&
+        command.debateId !== debate.id &&
+        command.debateId !== 'pending-debate'
+      ) {
         throw new OrchestratorError(
           `command debate ${command.debateId} does not match trusted debate ${debate.id}`,
         );
@@ -100,6 +114,19 @@ export class CoordinatorCommandExecutor {
         'finalize-debate must be the last command in a batch',
       );
     }
+  }
+
+  #executeCheckpoint(
+    debateId: DebateId,
+    command: CheckpointCommand,
+  ): CheckpointExecutionResult {
+    return Object.freeze({
+      type: 'checkpoint',
+      debateId,
+      roundId: command.roundId,
+      content: command.content,
+      recommendation: command.recommendation,
+    });
   }
 
   #executeDispatch(

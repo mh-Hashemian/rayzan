@@ -25,50 +25,48 @@ function round1Brief(snapshot: ReturnType<RayzanRuntime['snapshot']>) {
     commands: [
       {
         type: 'dispatch',
-        messageId: 'brief',
-        debateId: snapshot.debate!.id,
-        roundId: snapshot.round1!.id,
         recipients: { type: 'round-watchers' },
-        kind: 'brief',
         body: 'Analyze independently. Do not assume another Watcher response.',
-        referencedMessageIds: [],
       },
     ],
   });
 }
 
-function plan(snapshot: ReturnType<RayzanRuntime['snapshot']>) {
-  const round = snapshot.rounds.at(-1)!;
+function plan() {
   return JSON.stringify({
     version: 1,
-    commands: ['qwen', 'glm'].map((agentId) => ({
-      type: 'dispatch',
-      messageId: `${round.id}-${agentId}`,
-      debateId: snapshot.debate!.id,
-      roundId: round.id,
-      recipients: { type: 'explicit-agents', agentIds: [agentId] },
-      kind: 'query',
-      body: `Challenge ${agentId} using shared evidence.`,
-      referencedMessageIds: [],
-    })),
+    commands: [
+      {
+        type: 'dispatch',
+        recipients: { type: 'explicit-agents', agentIds: ['qwen'] },
+        body: 'Challenge Qwen using shared evidence.',
+      },
+      {
+        type: 'dispatch',
+        recipients: { type: 'explicit-agents', agentIds: ['glm'] },
+        body: 'Challenge GLM using shared evidence.',
+      },
+    ],
   });
 }
 
-const CHECKPOINT = `Current provisional recommendation:
+function checkpointCommand(recommendation: 'CONTINUE' | 'FINISH', content: string) {
+  return JSON.stringify({
+    version: 1,
+    commands: [
+      {
+        type: 'checkpoint',
+        content,
+        recommendation,
+      },
+    ],
+  });
+}
+
+const CHECKPOINT_BODY = `Current provisional recommendation:
 SQLite for the first release.
-What changed this round:
-The trade-off is now explicit.
-Current agreements:
-Both options need backups.
-Remaining disagreements:
-Operational complexity.
-Open questions:
-Expected write volume.
 Coordinator recommendation: CONTINUE
-Recommendation reason:
-Resolve operational complexity.
-Suggested next-round agenda:
-Compare the one-DevOps-engineer constraint.`;
+Resolve operational complexity.`;
 
 describe('operator-gated iterative debate', () => {
   it('persists a checkpoint, waits for the Operator, continues with exact guidance, and only synthesizes after finish', () => {
@@ -79,18 +77,30 @@ describe('operator-gated iterative debate', () => {
     respond(runtime, coordinator.id, round1Brief(runtime.snapshot()));
     const r1Qwen = runtime.nextPendingForAgent(qwen.id)!;
     const r1Glm = runtime.nextPendingForAgent(glm.id)!;
-    assert.deepEqual(r1Qwen.body.includes('COMMON'), false);
-    assert.deepEqual(r1Glm.body.includes('COMMON'), false);
+    assert.equal(r1Qwen.body.includes('COMMON'), false);
+    assert.equal(r1Glm.body.includes('COMMON'), false);
     respond(runtime, qwen.id, 'SQLite is operationally simple.');
     respond(runtime, glm.id, 'PostgreSQL handles concurrency.');
-    respond(runtime, coordinator.id, CHECKPOINT);
+    // Action loop re-invokes Coordinator; emit checkpoint to end Round 1.
+    respond(
+      runtime,
+      coordinator.id,
+      checkpointCommand('CONTINUE', CHECKPOINT_BODY),
+    );
 
     let state = runtime.snapshot();
     assert.equal(state.rounds.length, 1);
     assert.equal(state.awaitingOperator, true);
     assert.equal(state.checkpoint?.recommendation, 'continue');
     assert.equal(state.synthesis, undefined);
-    assert.equal(events.listAll().some((event) => event.type === 'COORDINATOR_CHECKPOINT_CREATED'), true);
+    assert.equal(
+      events.listAll().some((event) => event.type === 'COORDINATOR_CHECKPOINT_CREATED'),
+      true,
+    );
+    assert.equal(
+      events.listAll().some((event) => event.type === 'COORDINATOR_ACTION_CREATED'),
+      true,
+    );
 
     runtime.continueDebate('Assume the company has only one DevOps engineer.');
     state = runtime.snapshot();
@@ -98,17 +108,23 @@ describe('operator-gated iterative debate', () => {
     assert.equal(state.awaitingOperator, false);
     const coordinatorPlan = runtime.nextPendingForAgent(coordinator.id)!;
     assert.match(coordinatorPlan.body, /only one DevOps engineer/);
-    assert.equal(events.listAll().some((event) => event.type === 'OPERATOR_INTERVENTION' && (event.payload as { guidance?: string }).guidance === 'Assume the company has only one DevOps engineer.'), true);
-    respond(runtime, coordinator.id, plan(state));
+    respond(runtime, coordinator.id, plan());
     respond(runtime, qwen.id, 'SQLite still fits the constrained team.');
     respond(runtime, glm.id, 'PostgreSQL remains viable but heavier.');
-    respond(runtime, coordinator.id, CHECKPOINT);
+    respond(
+      runtime,
+      coordinator.id,
+      checkpointCommand('CONTINUE', CHECKPOINT_BODY),
+    );
 
     state = runtime.snapshot();
     assert.equal(state.awaitingOperator, true);
     assert.equal(state.synthesis, undefined);
     runtime.finishDebate();
-    assert.equal(events.listAll().some((event) => event.type === 'DEBATE_FINISH_REQUESTED'), true);
+    assert.equal(
+      events.listAll().some((event) => event.type === 'DEBATE_FINISH_REQUESTED'),
+      true,
+    );
     respond(runtime, coordinator.id, 'Final recommendation:\nStart with SQLite.');
     state = runtime.snapshot();
     assert.equal(state.synthesis?.body, 'Final recommendation:\nStart with SQLite.');
@@ -123,10 +139,14 @@ describe('operator-gated iterative debate', () => {
     respond(runtime, coordinator.id, round1Brief(runtime.snapshot()));
     respond(runtime, qwen.id, 'Qwen independent analysis');
     respond(runtime, glm.id, 'GLM independent analysis');
-    respond(runtime, coordinator.id, CHECKPOINT);
+    respond(
+      runtime,
+      coordinator.id,
+      checkpointCommand('CONTINUE', CHECKPOINT_BODY),
+    );
     const restored = new RayzanRuntime(events);
     assert.equal(restored.snapshot().awaitingOperator, true);
-    assert.equal(restored.snapshot().checkpoint?.body, CHECKPOINT);
+    assert.equal(restored.snapshot().checkpoint?.body, CHECKPOINT_BODY);
     assert.equal(restored.nextPendingForAgent(coordinator.id), undefined);
   });
 });

@@ -8,6 +8,8 @@ import {
 import { TransportError } from './error.js';
 import { asDeliveryId, newDeliveryId, type DeliveryId } from './ids.js';
 import type {
+  DeliveryQuarantine,
+  DeliveryQuarantineReason,
   InboundResponse,
   OutboundDelivery,
   PendingManualDelivery,
@@ -19,6 +21,7 @@ export class BrowserTransport implements Transport {
   readonly #messages = new Map<MessageId, MessageEnvelope>();
   readonly #deliveries = new Map<DeliveryId, OutboundDelivery>();
   readonly #frozen = new Set<string>();
+  readonly #quarantine = new Map<string, DeliveryQuarantine>();
 
   send(message: MessageEnvelope): readonly OutboundDelivery[] {
     if (this.#messages.has(message.id)) {
@@ -95,6 +98,33 @@ export class BrowserTransport implements Transport {
         delivery.status === 'delivered' &&
         !this.#frozen.has(delivery.id),
     );
+  }
+
+  /**
+   * Quarantine a delivery so it cannot be pending/awaiting work.
+   * History and the delivery row remain; only work queues exclude it.
+   */
+  quarantineDelivery(
+    deliveryId: string,
+    reason: DeliveryQuarantineReason,
+    detail?: string,
+  ): OutboundDelivery {
+    const id = asDeliveryId(deliveryId);
+    const delivery = this.#deliveries.get(id);
+    if (delivery === undefined) {
+      throw new TransportError(`unknown delivery id: ${id}`);
+    }
+    this.#frozen.add(id);
+    this.#quarantine.set(id, Object.freeze({ reason, ...(detail ? { detail } : {}) }));
+    return delivery;
+  }
+
+  getQuarantine(deliveryId: string): DeliveryQuarantine | undefined {
+    return this.#quarantine.get(asDeliveryId(deliveryId));
+  }
+
+  isQuarantined(deliveryId: string): boolean {
+    return this.#quarantine.has(asDeliveryId(deliveryId));
   }
 
   listAll(): readonly OutboundDelivery[] {

@@ -138,7 +138,7 @@ export function HomeView(input: {
         {agents.length === 0 ? (
           <p className="empty">
             {providersRestoring
-              ? 'Hang tight — checking ChatGPT, DeepSeek, Qwen, and GLM…'
+              ? 'Hang tight — warming provider sessions in parallel…'
               : 'No connected providers yet. Open Settings → AI Providers to connect.'}
           </p>
         ) : (

@@ -442,4 +442,50 @@ Hope that helps.`),
       OrchestratorError,
     );
   });
+
+  it('parses checkpoint without requiring machine ids from the LLM', () => {
+    const batch = parseCoordinatorCommandBatch(`{
+  "version": 1,
+  "commands": [
+    {
+      "type": "checkpoint",
+      "content": "DeepSeek asked X. GLM answered Y.",
+      "recommendation": "FINISH"
+    }
+  ]
+}`);
+    assert.equal(batch.commands.length, 1);
+    assert.equal(batch.commands[0]?.type, 'checkpoint');
+    if (batch.commands[0]?.type === 'checkpoint') {
+      assert.equal(batch.commands[0].recommendation, 'finish');
+      assert.match(batch.commands[0].content, /DeepSeek asked/);
+    }
+  });
+
+  it('rejects mixing dispatch and checkpoint in one step', () => {
+    assert.throws(
+      () =>
+        parseCoordinatorCommandBatch(
+          JSON.stringify({
+            version: 1,
+            commands: [
+              {
+                type: 'dispatch',
+                recipients: {
+                  type: 'explicit-agents',
+                  agentIds: ['deepseek'],
+                },
+                body: 'Ask a question.',
+              },
+              {
+                type: 'checkpoint',
+                content: 'Too early.',
+                recommendation: 'CONTINUE',
+              },
+            ],
+          }),
+        ),
+      /only one action mode/i,
+    );
+  });
 });

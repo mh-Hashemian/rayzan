@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
+import type { CaptureEvaluation } from '@rayzan/capture';
+
 import { ConversationStore } from './conversation-store.js';
+import { ProviderDebugTracker } from './debug-tracker.js';
+import {
+  fingerprintText,
+  type ManagedCaptureDebug,
+} from './managed-capture.js';
 import { ProviderBrowserHost } from './provider-browser.js';
 import {
   MANAGED_PROVIDERS,
@@ -23,30 +30,63 @@ interface PendingJob {
 export class ManagedProviderManager {
   readonly #browser: ProviderBrowserHost;
   readonly #store: ConversationStore;
+  readonly #debug = new ProviderDebugTracker();
+  readonly #captureActive = new Set<ManagedProviderId>();
+  readonly #lastTrackedIdentity = new Map<ManagedProviderId, string>();
   readonly #activeAgents = new Map<string, ManagedProviderId>();
   readonly #watchTimers = new Map<ManagedProviderId, NodeJS.Timeout>();
   readonly #captureFailures = new Map<string, number>();
+  readonly #providerReady = new Map<
+    ManagedProviderId,
+    { readonly promise: Promise<void>; resolve: () => void }
+  >();
   #loop: NodeJS.Timeout | undefined;
   #presenceLoop: NodeJS.Timeout | undefined;
+  #debugPushLoop: NodeJS.Timeout | undefined;
   #busy = new Set<string>();
   #restoring = false;
   #restorePromise: Promise<void> | undefined;
 
   constructor(input: { readonly userDataPath: string; readonly appIcon?: string }) {
-    this.#browser = new ProviderBrowserHost(input.appIcon);
+    this.#browser = new ProviderBrowserHost(input.appIcon, this.#debug);
     this.#store = new ConversationStore(input.userDataPath);
+    for (const provider of MANAGED_PROVIDERS) {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      this.#providerReady.set(provider.id, { promise, resolve });
+    }
     this.#ensurePresenceLoop();
+    // The delivery loop must exist so #reconcilePendingManagedAgents can
+    // activate providers with pending/awaiting work even when the debate was
+    // started headlessly (no UI attach) — otherwise reconcile never runs.
+    this.#ensureLoop();
+    this.#ensureDebugPushLoop();
     this.#restorePromise = this.#bootstrapSessions();
   }
 
-  /** True while startup session restore is in progress. */
+  /** True while any provider startup restore is still in progress. */
   isRestoring(): boolean {
     return this.#restoring;
   }
 
-  /** Wait until startup restore finishes (safe to call repeatedly). */
+  /** Wait until all startup restores finish (safe to call repeatedly). */
   async whenRestored(): Promise<void> {
     await this.#restorePromise;
+  }
+
+  /** Wait until a specific provider's restore/navigation lock is released. */
+  async whenProviderReady(providerId: ManagedProviderId): Promise<void> {
+    const gate = this.#providerReady.get(providerId);
+    if (gate) {
+      await gate.promise;
+    }
+  }
+
+  #releaseProviderReady(providerId: ManagedProviderId): void {
+    const gate = this.#providerReady.get(providerId);
+    gate?.resolve();
   }
 
   /** Stop delivery for a debate that was archived/ended by the Operator. */
@@ -55,6 +95,7 @@ export class ManagedProviderManager {
       this.#activeAgents.delete(row.agentId);
       if (row.status === 'active') {
         this.#store.markStatus(debateId, row.agentId, 'closed');
+        this.#debug.setConversation(row.providerId, 'none');
       }
     }
     if (this.#activeAgents.size === 0 && this.#loop) {
@@ -68,6 +109,11 @@ export class ManagedProviderManager {
     for (const row of this.#store.forDebate(debateId)) {
       if (row.status === 'active') {
         this.#activeAgents.set(row.agentId, row.providerId);
+        this.#debug.setConversation(
+          row.providerId,
+          'ready',
+          row.conversation.id,
+        );
       }
     }
     if (this.#activeAgents.size > 0) {
@@ -191,7 +237,24 @@ export class ManagedProviderManager {
           });
           continue;
         }
-        const created = await this.#browser.createNewChat(providerId);
+        let created: { url: string };
+        try {
+          created = await this.#browser.createNewChat(providerId);
+        } catch (error) {
+          // Still register the agent so pending deliveries are processed; use
+          // the current page URL instead of aborting attach.
+          const message = error instanceof Error ? error.message : String(error);
+          console.log(
+            `[attach] ${providerId} createNewChat failed (${message}); using current URL`,
+          );
+          const win = await this.#browser.ensureWindow(providerId);
+          created = {
+            url:
+              win.webContents.getURL() ||
+              MANAGED_PROVIDERS.find((item) => item.id === providerId)?.homeUrl ||
+              '',
+          };
+        }
         const conversation: ProviderConversationRef = {
           id: `conv-${randomUUID()}`,
           providerId,
@@ -205,6 +268,7 @@ export class ManagedProviderManager {
           conversation,
         });
         this.#activeAgents.set(agent.agentId, providerId);
+        this.#debug.setConversation(providerId, 'ready', conversation.id);
         await this.#noteBinding(agent.agentId, providerId, true);
         attached.push({
           agentId: agent.agentId,
@@ -213,6 +277,7 @@ export class ManagedProviderManager {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        console.log(`[attach] ${agent.agentId} skipped: ${message}`);
         skipped.push({ agentId: agent.agentId, reason: message });
       }
     }
@@ -268,11 +333,17 @@ export class ManagedProviderManager {
       clearInterval(this.#presenceLoop);
       this.#presenceLoop = undefined;
     }
+    if (this.#debugPushLoop) {
+      clearInterval(this.#debugPushLoop);
+      this.#debugPushLoop = undefined;
+    }
     this.#browser.dispose();
   }
 
   async #bootstrapSessions(): Promise<void> {
     this.#restoring = true;
+    const startedAt = Date.now();
+    console.log(`[restore-trace] bootstrap start +0ms`);
     for (const provider of MANAGED_PROVIDERS) {
       this.#browser.setStatus(
         provider.id,
@@ -281,42 +352,79 @@ export class ManagedProviderManager {
       );
     }
     try {
-      for (const provider of MANAGED_PROVIDERS) {
-        let restored = false;
-        for (let attempt = 0; attempt < 4 && !restored; attempt += 1) {
-          try {
-            if (attempt > 0) {
-              await delay(800 * attempt);
-            }
-            // Load the partitioned session in the background (no focus steal).
-            await this.#browser.ensureWindow(provider.id);
-            await this.#browser.navigateHome(provider.id);
-            const probe = await this.#browser.refreshConnection(provider.id);
-            if (probe.loggedIn) {
-              await this.#markConnected(provider.id);
-              restored = true;
-            } else if (attempt === 3) {
-              this.#browser.setStatus(provider.id, 'not_connected');
-            } else {
-              this.#browser.setStatus(
-                provider.id,
-                'restoring',
-                'Waiting for provider session…',
-              );
-            }
-          } catch {
-            if (attempt === 3) {
-              this.#browser.setStatus(
-                provider.id,
-                'not_connected',
-                'Could not restore session — Connect to sign in',
-              );
-            }
+      await Promise.allSettled(
+        MANAGED_PROVIDERS.map((provider) =>
+          this.#restoreProvider(provider.id, startedAt),
+        ),
+      );
+    } finally {
+      this.#restoring = false;
+      console.log(
+        `[restore-trace] bootstrap complete +${Date.now() - startedAt}ms`,
+      );
+    }
+    if (process.env.RAYZAN_SEND_TRACE === '1') {
+      setImmediate(() => {
+        void this.runSendLatencyProbe();
+      });
+    }
+  }
+
+  async #restoreProvider(
+    providerId: ManagedProviderId,
+    startedAt: number,
+  ): Promise<void> {
+    const mark = (label: string) => {
+      console.log(
+        `[restore-trace] ${providerId} ${label} +${Date.now() - startedAt}ms`,
+      );
+    };
+    mark('started');
+    try {
+      let restored = false;
+      for (let attempt = 0; attempt < 4 && !restored; attempt += 1) {
+        try {
+          if (attempt > 0) {
+            await delay(800 * attempt);
+          }
+          // Load partitioned session once — no redundant second home navigation.
+          await this.#browser.ensureProviderHome(providerId);
+          const probe = await this.#browser.refreshConnection(providerId);
+          if (probe.loggedIn) {
+            await this.#markConnected(providerId);
+            restored = true;
+            mark('connected');
+          } else if (attempt === 3) {
+            this.#browser.setStatus(providerId, 'not_connected');
+            mark('not_connected');
+            // Keep probing — SPA may hydrate after the restore budget.
+            this.#startLoginWatch(providerId);
+          } else {
+            this.#browser.setStatus(
+              providerId,
+              'restoring',
+              'Waiting for provider session…',
+            );
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.log(
+            `[restore-trace] ${providerId} attempt ${attempt} error: ${message}`,
+          );
+          if (attempt === 3) {
+            this.#browser.setStatus(
+              providerId,
+              'not_connected',
+              'Could not restore session — Connect to sign in',
+            );
+            mark('failed');
+            this.#startLoginWatch(providerId);
           }
         }
       }
     } finally {
-      this.#restoring = false;
+      this.#releaseProviderReady(providerId);
+      mark('ready_gate_released');
     }
   }
 
@@ -374,6 +482,33 @@ export class ManagedProviderManager {
     }, 4000);
   }
 
+  /** Push the ephemeral managed debug snapshot to the bridge (debug only). */
+  #ensureDebugPushLoop(): void {
+    if (this.#debugPushLoop) {
+      return;
+    }
+    this.#debugPushLoop = setInterval(() => {
+      void this.#pushDebugState();
+    }, 2_000);
+  }
+
+  async #pushDebugState(): Promise<void> {
+    this.#browser.reconcilePageStates();
+    const payload = {
+      pushedAt: Date.now(),
+      restoring: this.#restoring,
+      sendTraceEnabled: process.env.RAYZAN_SEND_TRACE === '1',
+      providers: MANAGED_PROVIDERS.map((provider) =>
+        this.#debug.snapshot(provider.id),
+      ),
+    };
+    try {
+      await bridgePost('/api/debug/managed-state', payload);
+    } catch {
+      // Debug-only best effort; bridge may be starting or unavailable.
+    }
+  }
+
   #status(id: ManagedProviderId): ProviderStatus {
     return {
       id,
@@ -394,7 +529,42 @@ export class ManagedProviderManager {
     }, 1500);
   }
 
+  /**
+   * If the Coordinator dispatched to a managed agent that was never attached
+   * (createNewChat failed / attach skipped), register it so pending work runs.
+   */
+  async #reconcilePendingManagedAgents(): Promise<void> {
+    for (const provider of MANAGED_PROVIDERS) {
+      const agentId = defaultAgentId(provider.id);
+      if (this.#activeAgents.has(agentId)) {
+        continue;
+      }
+      if (this.#browser.statusOf(provider.id) !== 'connected') {
+        continue;
+      }
+      try {
+        const pending = await bridgeGet<{ job: PendingJob | null }>(
+          `/api/deliveries/pending?agentId=${encodeURIComponent(agentId)}`,
+        );
+        const awaiting = await bridgeGet<{ job: PendingJob | null }>(
+          `/api/deliveries/awaiting?agentId=${encodeURIComponent(agentId)}`,
+        );
+        if (pending.job === null && awaiting.job === null) {
+          continue;
+        }
+        console.log(
+          `[reconcile] activating ${agentId} for pending/awaiting delivery`,
+        );
+        this.#activeAgents.set(agentId, provider.id);
+        this.#ensureLoop();
+      } catch {
+        // Bridge may be briefly unavailable.
+      }
+    }
+  }
+
   async #tick(): Promise<void> {
+    await this.#reconcilePendingManagedAgents();
     const work = [...this.#activeAgents.entries()].map(
       async ([agentId, providerId]) => {
         if (this.#busy.has(agentId)) {
@@ -446,24 +616,125 @@ export class ManagedProviderManager {
     providerId: ManagedProviderId,
     job: PendingJob,
   ): Promise<void> {
+    const t0 = Date.now();
+    const mark = (label: string) => {
+      console.log(
+        `[send-trace] deliver ${providerId} ${label} +${Date.now() - t0}ms restoring=${this.#restoring}`,
+      );
+    };
+    mark('pendingSelected');
+    this.#debug.transition(providerId, 'delivery-selected', job.deliveryId);
+    // Per-provider restore lock — never wait for other providers.
+    await this.whenProviderReady(providerId);
+    mark('providerReady');
     await this.#notePresence(agentId, providerId, 'sending');
+    mark('presenceSending');
     await this.#browser.wakeForWork(providerId);
-    const expectJson =
-      /reply with json only|json only|command batch/i.test(job.body) &&
-      /"commands"\s*:/.test(job.body);
+    mark('wakeForWork');
+    const expectJson = jobExpectsJsonDispatch(job.body);
     const body =
       expectJson && providerId === 'deepseek'
         ? `Do not use DeepThink / chain-of-thought. Reply with the JSON object only — no prose before or after.\n\n${job.body}`
         : job.body;
-    const before = await this.#browser.snapshot(providerId);
-    await this.#browser.sendMessage(providerId, body);
+    const beforeSend = await this.#browser.conversationSnapshot(providerId);
+    mark('conversationSnapshot');
+    let generatingNoted = false;
+    const noteGenerating = () => {
+      if (generatingNoted) {
+        return;
+      }
+      generatingNoted = true;
+      mark('presenceGenerating');
+      void this.#notePresence(agentId, providerId, 'generating').catch(
+        () => undefined,
+      );
+    };
+    try {
+      await this.#browser.sendMessage(providerId, body, {
+        onSubmissionAccepted: noteGenerating,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#debug.noteError(providerId, `send failed: ${message}`);
+      throw error;
+    }
+    mark('sendMessageReturned');
+    noteGenerating();
     await this.#ackDelivery(agentId, job.deliveryId);
-    await this.#notePresence(agentId, providerId, 'generating');
+    mark('ackDelivery');
     if (job.capture === false) {
       await this.#notePresence(agentId, providerId, 'waiting');
       return;
     }
-    await this.#captureAndSubmit(agentId, providerId, job, before.count, false);
+    await this.#captureAndSubmit(agentId, providerId, job, beforeSend);
+  }
+
+  /** Temporary comparative send probe — only when RAYZAN_SEND_TRACE=1. */
+  async runSendLatencyProbe(): Promise<void> {
+    const mode = process.env.RAYZAN_SEND_TRACE;
+    if (mode !== '1' && mode !== 'insert') {
+      return;
+    }
+
+    if (mode === 'insert' || mode === '1') {
+      const sizes: { readonly name: string; readonly text: string }[] = [
+        { name: 'short_50', text: 'x'.repeat(50) },
+        {
+          name: 'medium_2kb',
+          text: 'Evidence line.\n'.repeat(Math.ceil(2048 / 14)),
+        },
+        {
+          name: 'large_10kb',
+          text: 'Coordinator evidence packet line with Unicode Δ — 你好.\n'.repeat(
+            Math.ceil(10_240 / 52),
+          ),
+        },
+      ];
+      for (const size of sizes) {
+        if (this.#browser.statusOf('chatgpt') !== 'connected') {
+          console.log(`[send-trace] skip insert bench: chatgpt not connected`);
+          break;
+        }
+        try {
+          const result = await this.#browser.traceFillLatency(
+            'chatgpt',
+            size.text,
+          );
+          console.log(
+            `[send-trace] INSERT_BENCH ${size.name} chars=${size.text.length}`,
+            JSON.stringify(result),
+          );
+        } catch (error) {
+          console.log(
+            `[send-trace] INSERT_BENCH_FAIL ${size.name}`,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    }
+
+    if (mode !== '1') {
+      return;
+    }
+
+    for (const id of ['chatgpt', 'deepseek'] as const) {
+      if (this.#browser.statusOf(id) !== 'connected') {
+        console.log(`[send-trace] skip ${id}: status=${this.#browser.statusOf(id)}`);
+        continue;
+      }
+      try {
+        const result = await this.#browser.traceSendLatency(
+          id,
+          'Rayzan send-latency probe. Reply with exactly one word: ok',
+        );
+        console.log(`[send-trace] RESULT ${id}`, JSON.stringify(result));
+      } catch (error) {
+        console.log(
+          `[send-trace] FAIL ${id}`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
   }
 
   async #resumeCapture(
@@ -471,63 +742,127 @@ export class ManagedProviderManager {
     providerId: ManagedProviderId,
     job: PendingJob,
   ): Promise<void> {
+    await this.whenProviderReady(providerId);
+    this.#debug.transition(
+      providerId,
+      'delivery-selected',
+      `${job.deliveryId} (capture resumed)`,
+    );
     await this.#notePresence(agentId, providerId, 'generating');
     await this.#browser.wakeForWork(providerId);
-    const expectJson =
-      /reply with json only|json only|command batch/i.test(job.body) &&
-      /"commands"\s*:/.test(job.body);
-    const snap = await this.#browser.snapshot(providerId);
-    const last = snap.last.trim();
-    // If the new JSON reply is already on screen, allow it. Otherwise require a
-    // new assistant turn so we do not re-parse the previous checkpoint prose.
-    const alreadyJson =
-      expectJson &&
-      (/"commands"\s*:/.test(last) ||
-        /"version"\s*:/.test(last) ||
-        last.includes('```'));
-    const preCount = alreadyJson
-      ? Math.max(0, snap.count - 1)
-      : snap.count;
-    await this.#captureAndSubmit(
-      agentId,
-      providerId,
-      job,
-      preCount,
-      alreadyJson,
-    );
+    // Resume: treat current turns minus the latest as the before-send snapshot
+    // when a new turn may already exist; otherwise use live snapshot as baseline
+    // and wait for a newer turn via the capture machine.
+    const live = await this.#browser.conversationSnapshot(providerId);
+    const beforeSend =
+      live.assistantTurnCount > 0
+        ? {
+            identities: live.identities.slice(0, -1),
+            assistantTurnCount: Math.max(0, live.assistantTurnCount - 1),
+            lastAssistantText: live.identities.length > 1
+              ? live.lastAssistantText
+              : undefined,
+            lastIncomplete: false,
+          }
+        : live;
+    await this.#captureAndSubmit(agentId, providerId, job, beforeSend);
   }
 
   async #captureAndSubmit(
     agentId: string,
     providerId: ManagedProviderId,
     job: PendingJob,
-    preCount: number,
-    allowExisting: boolean,
+    beforeSend: Awaited<
+      ReturnType<ProviderBrowserHost['conversationSnapshot']>
+    >,
   ): Promise<void> {
-    const expectJson =
-      /reply with json only|json only|command batch/i.test(job.body) &&
-      /"commands"\s*:/.test(job.body);
+    const debugBox: { current?: ManagedCaptureDebug } = {};
+    // Heartbeat keeps lastSeen fresh without claiming a false generation state.
+    let lastPhase: string = 'generating';
+    const heartbeat = setInterval(() => {
+      void this.#notePresence(agentId, providerId, lastPhase).catch(
+        () => undefined,
+      );
+    }, 3_000);
+    this.#captureActive.add(providerId);
+    this.#lastTrackedIdentity.delete(providerId);
+    this.#debug.setCaptureActive(providerId, true);
     try {
-      const text = await this.#browser.captureStableResponse(
-        providerId,
-        preCount,
-        {
-          expectJson,
-          allowExisting,
-          // Retries should still allow long DeepSeek thinking on JSON plans.
-          timeoutMs: allowExisting
-            ? expectJson
-              ? 300_000
-              : 90_000
-            : expectJson
-              ? 420_000
-              : 180_000,
-          // GLM streams while "thinking" UI is up — need a longer settle.
-          stabilityMs: providerId === 'glm' ? 5_000 : expectJson ? 3_500 : 2_500,
+      await this.#notePresence(agentId, providerId, 'generating');
+      const text = await this.#browser.captureResponse(providerId, beforeSend, {
+        deliveryId: job.deliveryId,
+        lastDebug: debugBox,
+        onPhase: (phase) => {
+          lastPhase = phase;
+          void this.#notePresence(agentId, providerId, phase).catch(
+            () => undefined,
+          );
         },
+        onEvaluation: (evaluation) => {
+          this.#observeCaptureEvaluation(providerId, evaluation);
+        },
+      });
+      // Diagnostic A/B/C/D recording for the capture boundary (dev log only).
+      const debug = debugBox.current;
+      let finalDom:
+        | {
+            length: number;
+            hash: string;
+            tail: string;
+            changedAfterCapture: boolean;
+          }
+        | undefined;
+      try {
+        const finalObs = await this.#browser.observe(providerId);
+        const finalText = finalObs.turns.at(-1)?.finalText ?? '';
+        finalDom = {
+          ...fingerprintText(finalText),
+          changedAfterCapture: finalText !== text,
+        };
+      } catch {
+        // Diagnostic only.
+      }
+      console.log(
+        '[capture-debug]',
+        JSON.stringify({
+          provider: providerId,
+          deliveryId: job.deliveryId,
+          textAtGenerationEnd: debug?.textAtGenerationEnd,
+          captured: debug
+            ? {
+                length: debug.finalLength,
+                tail: debug.capturedTextTail,
+                hash: debug.capturedTextHash,
+                capturedAt: debug.capturedAt,
+                generationEndedAt: debug.generationEndedAt,
+              }
+            : undefined,
+          settledRead: debug?.settledRead,
+          finalDom,
+          transitions: debug?.transitions,
+        }),
       );
       await this.#submitResponse(agentId, job.deliveryId, text);
-      await this.#notePresence(agentId, providerId, 'captured');
+      await this.#notePresence(agentId, providerId, 'captured', undefined, {
+        deliveryId: job.deliveryId,
+        phase: 'captured',
+        ...(debug
+          ? {
+              textLength: debug.finalLength,
+              preSendTurnCount: debug.beforeSend.assistantTurnCount,
+              trackedIdentity: debug.newTurnIdentity,
+              generationEndedAt: debug.generationEndedAt,
+              capturedAt: debug.capturedAt,
+              ...(debug.settledRead
+                ? {
+                    domChangedAfterTerminal:
+                      debug.settledRead.changedAfterTerminalRead,
+                  }
+                : {}),
+            }
+          : {}),
+        ...(finalDom ? { domChangedAfterCapture: finalDom.changedAfterCapture } : {}),
+      });
       this.#captureFailures.delete(job.deliveryId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -538,12 +873,76 @@ export class ManagedProviderManager {
       }
       const failures = (this.#captureFailures.get(job.deliveryId) ?? 0) + 1;
       this.#captureFailures.set(job.deliveryId, failures);
+      this.#debug.noteError(
+        providerId,
+        `capture failed for ${job.deliveryId}: ${message}`,
+      );
       await this.#notePresence(
         agentId,
         providerId,
-        'generating',
-        `${message} — retrying capture (attempt ${failures})`,
+        'attention',
+        `${message} — capture failed (attempt ${failures}); Operator recovery required`,
+        {
+          deliveryId: job.deliveryId,
+          phase: 'failed',
+          reason: message,
+          ...(debugBox.current
+            ? {
+                textLength: debugBox.current.finalLength,
+                trackedIdentity: debugBox.current.newTurnIdentity,
+              }
+            : {}),
+        },
       );
+    } finally {
+      clearInterval(heartbeat);
+      this.#captureActive.delete(providerId);
+      this.#debug.setCaptureActive(providerId, false);
+    }
+  }
+
+  /**
+   * Feed one capture-machine evaluation into the ephemeral debug tracker.
+   * States come straight from the machine — never inferred from timers.
+   */
+  #observeCaptureEvaluation(
+    providerId: ManagedProviderId,
+    evaluation: CaptureEvaluation,
+  ): void {
+    const debug = this.#debug;
+    const identity = evaluation.tracked?.identity;
+    if (identity !== undefined) {
+      const previous = this.#lastTrackedIdentity.get(providerId);
+      if (previous !== identity) {
+        this.#lastTrackedIdentity.set(providerId, identity);
+        debug.transition(providerId, 'new-turn-detected', identity);
+      }
+    }
+    if (evaluation.phase === 'captured') {
+      debug.setGeneration(providerId, 'ended');
+      debug.transition(
+        providerId,
+        'capture-captured',
+        `${evaluation.text?.length ?? 0} chars`,
+      );
+      return;
+    }
+    if (evaluation.phase === 'failed') {
+      if (evaluation.generationEndedAt !== undefined) {
+        debug.setGeneration(providerId, 'ended');
+      }
+      debug.transition(
+        providerId,
+        'capture-failed',
+        evaluation.failure ?? 'unknown',
+      );
+      return;
+    }
+    if (evaluation.sawGenerating && evaluation.generationEndedAt === undefined) {
+      debug.setGeneration(providerId, 'active');
+    }
+    if (evaluation.generationEndedAt !== undefined) {
+      debug.setGeneration(providerId, 'ended');
     }
   }
 
@@ -618,6 +1017,25 @@ function defaultAgentId(providerId: ManagedProviderId): string {
 function isIdempotentDeliveryError(message: string): boolean {
   return /already confirmed|already submitted|round already completed|response already submitted|cannot mark a responded/i.test(
     message,
+  );
+}
+
+/**
+ * True only when this job's *instructions* ask for a Coordinator JSON command
+ * batch. Do not scan the evidence packet — prior Watcher/Coordinator text often
+ * contains "json only" / `"commands"` and would force Markdown checkpoints into
+ * an endless JSON wait (ChatGPT coordinator stuck on delivered).
+ */
+function jobExpectsJsonDispatch(body: string): boolean {
+  const instruction = body.split(
+    /Semantic evidence|Evidence packet|OPERATOR PROBLEM:|Original Operator problem|COMMON (?:ROUND 1 |DEBATE )?EVIDENCE/i,
+  )[0] ?? body;
+  if (/Do not (?:emit|write) JSON/i.test(instruction)) {
+    return false;
+  }
+  return (
+    /Reply with JSON only/i.test(instruction) &&
+    /"commands"\s*:/.test(instruction)
   );
 }
 

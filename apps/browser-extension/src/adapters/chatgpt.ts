@@ -1,14 +1,9 @@
+import { sendChatGptPrompt } from '@rayzan/capture/send';
 import {
-  clickControl,
   isVisible,
-  pressEnter,
   queryAll,
   queryFirst,
-  richComposerText,
-  setRichComposerValue,
-  submitFilledComposer,
   visibleText,
-  waitUntil,
 } from './observe.js';
 import type {
   AdapterDiagnostics,
@@ -16,7 +11,7 @@ import type {
   ConversationSnapshot,
   PromptSendResult,
 } from './types.js';
-import type { AssistantTurn } from '../capture/types.js';
+import type { AssistantTurn } from '../capture/assistant-turn.js';
 import { liveSnapshotFromTurns, turnIdentity } from '../capture/turns.js';
 
 const THINKING_SELECTORS = [
@@ -148,34 +143,6 @@ export function chatgptListTurns(root?: ParentNode): AssistantTurn[] {
   });
 }
 
-function composer(): HTMLElement | undefined {
-  const element = queryFirst('#prompt-textarea');
-  if (
-    element instanceof HTMLElement &&
-    element.getAttribute('contenteditable') === 'true'
-  ) {
-    return element;
-  }
-  return undefined;
-}
-
-function sendButton(): HTMLElement | undefined {
-  return chatgptSendControl();
-}
-
-function chatgptSubmitAccepted(
-  field: HTMLElement,
-  snapshot: ConversationSnapshot,
-): boolean {
-  if (richComposerText(field).length === 0) {
-    return true;
-  }
-  if (chatgptIsGenerating()) {
-    return true;
-  }
-  return chatgptListTurns().length > snapshot.assistantTurnCount;
-}
-
 function conversationFromLive(
   live: ReturnType<typeof liveSnapshotFromTurns>,
 ): ConversationSnapshot {
@@ -207,36 +174,7 @@ export const chatgptAdapter: BrowserAdapter = {
   },
   async sendPrompt(text: string): Promise<PromptSendResult> {
     const snapshot = this.snapshotConversation();
-    const field = composer();
-    if (!field) {
-      throw new Error(
-        'ChatGPT input was not found (div#prompt-textarea[contenteditable=true]).',
-      );
-    }
-    setRichComposerValue(field, text);
-    await submitFilledComposer({
-      field,
-      findSend: () => sendButton(),
-    });
-    const accepted = () =>
-      chatgptSubmitAccepted(field, snapshot) ? true : undefined;
-    try {
-      await waitUntil(accepted, {
-        timeoutMs: 2000,
-        message: 'ChatGPT send click did not submit.',
-      });
-    } catch {
-      const retry = sendButton();
-      if (retry) {
-        clickControl(retry);
-      }
-      pressEnter(field);
-      await waitUntil(accepted, {
-        timeoutMs: 2500,
-        message:
-          'ChatGPT send control was activated but the composer did not submit.',
-      });
-    }
+    await sendChatGptPrompt(text);
     return { snapshot };
   },
   async captureLatestResponse(): Promise<string> {
@@ -250,8 +188,8 @@ export const chatgptAdapter: BrowserAdapter = {
     const turns = chatgptListTurns();
     return {
       provider: 'ChatGPT',
-      inputFound: composer() !== undefined,
-      sendFound: sendButton() !== undefined,
+      inputFound: queryFirst('#prompt-textarea') !== undefined,
+      sendFound: chatgptSendControl() !== undefined,
       assistantTurns: turns.length,
       generating: chatgptIsGenerating(),
       currentTrackedTurn: turns.at(-1)?.finalText.slice(0, 80) || undefined,

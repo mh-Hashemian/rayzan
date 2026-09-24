@@ -15,8 +15,10 @@ export interface CoordinatorCheckpointView {
 export type AgentPhaseStatus =
   | 'Active'
   | 'Thinking'
+  | 'Capturing'
   | 'Responded'
   | 'Waiting'
+  | 'Attention'
   | 'Awaiting Operator'
   | 'Completed';
 
@@ -74,6 +76,17 @@ export interface TranscriptMessage {
   readonly body: string;
 }
 
+export interface WatcherContributionView {
+  readonly id: string;
+  readonly agentId: string;
+  readonly name: string;
+  readonly provider?: string;
+  readonly roundNumber: number;
+  readonly prompt: string;
+  readonly response?: string;
+  readonly status: 'Waiting' | 'Responded';
+}
+
 export interface DebateWorkspaceView {
   readonly title: string;
   readonly subtitle: string;
@@ -82,12 +95,19 @@ export interface DebateWorkspaceView {
   readonly details: readonly ProgressDetail[];
   readonly nextAction?: string;
   readonly agents: readonly AgentProgress[];
+  readonly contributions: readonly WatcherContributionView[];
+  readonly coordinatorAnswer?: string;
+  readonly coordinatorAnswerLabel?: string;
   readonly timeline: readonly TimelineItem[];
   readonly insights: InsightsView;
   readonly transcript: readonly TranscriptMessage[];
   readonly synthesis?: string;
   readonly checkpoint?: CoordinatorCheckpointView;
   readonly awaitingOperator: boolean;
+  readonly operatorQuestion?: {
+    readonly roundNumber: number;
+    readonly question: string;
+  };
   readonly lastError?: string;
   readonly canRetryCoordinatorDispatch?: boolean;
 }

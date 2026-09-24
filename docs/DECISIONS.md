@@ -551,6 +551,26 @@ After every mechanically completed round, the Coordinator creates a concise chec
 Reason:
 Coordinator recommendations are semantic input, not autonomous authorization. The Operator owns the stop/continue decision and recovery must restore a checkpoint gate without resending browser work.
 
+## DEC-057 — Rayzan orchestrates mechanically; the Coordinator orchestrates intellectually
+
+Status: Accepted
+
+Decision:
+Rayzan owns transport, persistence, lifecycle, replay, UI, provenance, and Operator controls. The Coordinator owns problem interpretation, Watcher questioning, debate strategy, semantic synthesis, and output-format selection. Rounds remain mechanical consultation boundaries for dispatch grouping, collection, timeline, and provenance — not mandatory reasoning templates. Rayzan must not append a generic intellectual Watcher response contract after the Coordinator authors a Watcher request, and must not add a Rayzan-side semantic task classifier. Desktop surfaces a self-contained Coordinator answer plus optional AI Team Contributions (exact prompt, captured response, round).
+
+Reason:
+Hard-coded Watcher analysis templates made trivial Operator tasks produce essay debates. Intelligence belongs with the Coordinator; Rayzan stays a thin mechanical platform.
+
+## DEC-058 — Coordinator decisions are incremental executable actions
+
+Status: Accepted
+
+Decision:
+Inside an Operator-authorized consultation round, the Coordinator emits incremental Rayzan actions from a closed v1 set: `dispatch`, `forward`, `ask_operator`, and `checkpoint`. Same-step actions of one mode execute in parallel; Rayzan waits for terminal results, then re-invokes the Coordinator with new evidence. `forward` sends prior Watcher responses verbatim (via durable evidence refs E1…En) with optional instruction and preserved authorship. `ask_operator` pauses the current round for an Operator clarification without creating a new round. `checkpoint` ends the consultation and returns the Operator gate (FINISH|CONTINUE recommendation; Operator decides). Backend binds control-plane ids. `COORDINATOR_ACTION_CREATED` / `COORDINATOR_OPERATOR_QUESTION_CREATED` support replay. Rayzan does not implement a semantic DAG/workflow engine.
+
+Reason:
+Forced one-dispatch-per-Watcher batching and manual copy of prior answers blocked dependent multi-agent consultation. The Coordinator must plan intellectually while Rayzan remains the mechanical executor and durable evidence system.
+
 ## DEC-052 — Rayzan preserves debate history and permits at most one active debate
 
 Status: Accepted

@@ -64,6 +64,8 @@
 - [x] Debate workspace / Observatory UI (3C.3 — layout + live progress/agents/synthesis)
 - [x] 3C.3 Acceptance Stabilization (reliable complete debate loop; awaiting Operator validation)
 - [x] Operator-gated iterative debate loop (3C.4 — checkpoints, Continue, guidance, Finish, dynamic Desktop stages)
+- [ ] Coordinator-centric orchestration (3C.5 — Coordinator owns Watcher prompts/format; Desktop Contributions View; awaiting Operator validation)
+- [ ] Agentic Coordinator action loop (3C.6 — selective/sequential/parallel dispatch + re-invocation; awaiting Operator validation)
 
 ## Phase 3D — Managed provider browser
 

@@ -12,7 +12,7 @@ import type {
   ConversationSnapshot,
   PromptSendResult,
 } from './types.js';
-import type { AssistantTurn } from '../capture/types.js';
+import type { AssistantTurn } from '../capture/assistant-turn.js';
 import { liveSnapshotFromTurns, turnIdentity } from '../capture/turns.js';
 
 export function glmAssistantTurns(root?: ParentNode): Element[] {
@@ -57,10 +57,12 @@ export function glmIsGenerating(root?: ParentNode): boolean {
     return true;
   }
   const last = glmAssistantTurns(root).at(-1);
-  // Thinking chain means the model is still working — do not treat streamed
-  // answer fragments as a finished reply.
+  const answer = glmExtract(last);
+  // Collapsed thinking nodes often remain after completion. Only treat
+  // thinking as in-progress when there is still no answer text.
   if (
     last &&
+    answer.length === 0 &&
     last.querySelector(
       '.thinking-chain-container, [class*="thinking-chain"]',
     )
@@ -71,7 +73,7 @@ export function glmIsGenerating(root?: ParentNode): boolean {
   const sendDisabled = Boolean(
     send && 'disabled' in send && (send as { disabled: boolean }).disabled,
   );
-  return sendDisabled && glmExtract(last).length === 0;
+  return sendDisabled && answer.length === 0;
 }
 
 export function glmExtract(turn: Element | undefined): string {

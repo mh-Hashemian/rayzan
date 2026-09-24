@@ -12,6 +12,21 @@ export const DELIVERY_STATUSES = ['pending', 'delivered', 'responded'] as const;
 
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
+/** Durable recovery classification — history is never deleted. */
+export const DELIVERY_QUARANTINE_REASONS = [
+  'IN_DOUBT',
+  'SUPERSEDED',
+  'FAILED',
+] as const;
+
+export type DeliveryQuarantineReason =
+  (typeof DELIVERY_QUARANTINE_REASONS)[number];
+
+export interface DeliveryQuarantine {
+  readonly reason: DeliveryQuarantineReason;
+  readonly detail?: string;
+}
+
 export interface OutboundDelivery {
   readonly id: DeliveryId;
   readonly messageId: MessageId;

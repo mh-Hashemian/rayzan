@@ -1,10 +1,17 @@
+/**
+ * Shared capture contract for extension + managed Electron browser.
+ *
+ * Completion = new assistant turn for this prompt + provider generation ended.
+ * Timers are watchdogs only — never happy-path completion heuristics.
+ */
+
 export type CapturePhase =
   | 'idle'
   | 'snapshot'
   | 'prompt-submitted'
   | 'waiting-for-new-turn'
   | 'generating'
-  | 'stabilizing'
+  | 'reading-final-response'
   | 'captured'
   | 'failed';
 
@@ -15,14 +22,18 @@ export type CaptureFailureReason =
   | 'empty-response'
   | 'thinking-only'
   | 'bridge-submit-failed'
-  | 'snapshot-missing';
+  | 'snapshot-missing'
+  | 'send-failed'
+  | 'dom-unsupported';
 
-export interface AssistantTurn {
-  readonly element: Element;
+/** Serializable turn — Element is optional (extension may attach DOM nodes). */
+export interface CaptureTurn {
   readonly identity: string;
   readonly thinkingOnly: boolean;
   readonly hasFinalAnswer: boolean;
   readonly finalText: string;
+  readonly connected?: boolean;
+  readonly element?: unknown;
 }
 
 export interface CaptureSnapshot {
@@ -30,11 +41,10 @@ export interface CaptureSnapshot {
   readonly assistantTurnCount: number;
   readonly lastAssistantText?: string;
   readonly lastIncomplete: boolean;
-  readonly elements?: ReadonlySet<Element>;
 }
 
 export interface CaptureObservation {
-  readonly turns: readonly AssistantTurn[];
+  readonly turns: readonly CaptureTurn[];
   readonly generating: boolean;
 }
 
@@ -52,18 +62,19 @@ export interface CaptureReport {
   readonly textLength?: number;
   readonly posted?: boolean;
   readonly reason?: CaptureFailureReason | string;
+  readonly generationStartedAt?: number;
+  readonly generationEndedAt?: number;
+  readonly capturedAt?: number;
 }
 
-export interface CaptureJob {
-  readonly deliveryId: string;
-  readonly agentId: string;
-  readonly provider: string;
-  phase: CapturePhase;
-  trackedIdentity?: string;
-  readonly startedAt: number;
-  report: CaptureReport;
-}
+/** Watchdog only — not a completion heuristic. */
+export const NEW_TURN_WATCHDOG_MS = 90_000;
+/** Watchdog only — not a completion heuristic. */
+export const GENERATION_WATCHDOG_MS = 180_000;
 
-export const NEW_TURN_TIMEOUT_MS = 90_000;
-export const GENERATION_TIMEOUT_MS = 180_000;
-export const STABILITY_WINDOW_MS = 2_000;
+/** @deprecated Use NEW_TURN_WATCHDOG_MS. */
+export const NEW_TURN_TIMEOUT_MS = NEW_TURN_WATCHDOG_MS;
+/** @deprecated Use GENERATION_WATCHDOG_MS. */
+export const GENERATION_TIMEOUT_MS = GENERATION_WATCHDOG_MS;
+/** @deprecated Stability timers are not used for completion. */
+export const STABILITY_WINDOW_MS = 0;

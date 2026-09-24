@@ -14,7 +14,7 @@ import type {
   ConversationSnapshot,
   PromptSendResult,
 } from './types.js';
-import type { AssistantTurn } from '../capture/types.js';
+import type { AssistantTurn } from '../capture/assistant-turn.js';
 import { looksLikeIncompleteJson } from '../capture/incomplete-json.js';
 import { liveSnapshotFromTurns, turnIdentity } from '../capture/turns.js';
 

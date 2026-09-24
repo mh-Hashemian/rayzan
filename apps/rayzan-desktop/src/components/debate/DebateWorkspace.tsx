@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import {
   fetchRuntimeState,
+  answerOperatorQuestion,
   continueDebate,
   endDebate,
   finishDebate,
@@ -9,6 +10,7 @@ import {
   type RuntimeDebateState,
 } from '../../api.js';
 import { AgentProgressCard } from './AgentProgressCard.js';
+import { ContributionsPanel } from './ContributionsPanel.js';
 import { DebateProgress } from './DebateProgress.js';
 import { DebateTimeline } from './DebateTimeline.js';
 import { deriveDebateView } from './derive.js';
@@ -37,6 +39,8 @@ export function DebateWorkspace(input: {
   const [showReport, setShowReport] = useState(false);
   const [guidance, setGuidance] = useState('');
   const [gateBusy, setGateBusy] = useState(false);
+  const [operatorAnswer, setOperatorAnswer] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
   const [stopBusy, setStopBusy] = useState(false);
   const [managedAgentIds, setManagedAgentIds] = useState<ReadonlySet<string>>(
     new Set(),
@@ -125,6 +129,7 @@ export function DebateWorkspace(input: {
           ],
           details: [],
           agents: [],
+          contributions: [],
           timeline: [],
           transcript: [],
           insights: { agreement: [], disagreement: [], risks: [] },
@@ -170,6 +175,21 @@ export function DebateWorkspace(input: {
       setLoadError(error instanceof Error ? error.message : 'Could not update debate');
     } finally {
       setGateBusy(false);
+    }
+  }
+
+  async function replyToCoordinator() {
+    setAskBusy(true);
+    try {
+      const next = await answerOperatorQuestion(operatorAnswer);
+      setState(next);
+      setOperatorAnswer('');
+    } catch (error) {
+      setLoadError(
+        error instanceof Error ? error.message : 'Could not send answer',
+      );
+    } finally {
+      setAskBusy(false);
     }
   }
 
@@ -286,8 +306,8 @@ export function DebateWorkspace(input: {
 
       {showingFinal ? (
         <section className="obs-final card-panel" id="final-report">
-          <p className="obs-eyebrow">Decision Complete</p>
-          <h2>Final Coordinator Report</h2>
+          <p className="obs-eyebrow">Coordinator</p>
+          <h2>Final Answer</h2>
           <pre className="obs-report">{view.synthesis}</pre>
           <div className="wizard-actions">
             <button
@@ -326,16 +346,64 @@ export function DebateWorkspace(input: {
             nextAction={view.nextAction}
           />
 
+          <section className="obs-coordinator-answer card-panel" aria-label="Coordinator answer">
+            <p className="obs-eyebrow">Coordinator</p>
+            <h2>
+              {view.coordinatorAnswerLabel ??
+                (view.awaitingOperator ? 'Current Answer' : 'Reviewing responses…')}
+            </h2>
+            {view.coordinatorAnswer ? (
+              <pre className="obs-report">{view.coordinatorAnswer}</pre>
+            ) : (
+              <p className="review-copy">
+                The Coordinator answer will appear here after this consultation
+                completes. Watcher details stay below as optional evidence.
+              </p>
+            )}
+          </section>
+
+          {view.operatorQuestion ? (
+            <section
+              className="operator-gate card-panel"
+              aria-label="Coordinator needs your input"
+            >
+              <p className="obs-eyebrow">
+                Round {view.operatorQuestion.roundNumber} · Clarification
+              </p>
+              <h2>Coordinator needs your input</h2>
+              <p className="review-copy">{view.operatorQuestion.question}</p>
+              <label className="gate-guidance">
+                Your answer
+                <textarea
+                  value={operatorAnswer}
+                  disabled={askBusy}
+                  onChange={(event) => setOperatorAnswer(event.target.value)}
+                  placeholder="Reply so the consultation can continue…"
+                />
+              </label>
+              <div className="wizard-actions">
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={askBusy || !operatorAnswer.trim()}
+                  onClick={() => void replyToCoordinator()}
+                >
+                  Reply
+                </button>
+              </div>
+            </section>
+          ) : null}
+
           {view.awaitingOperator && view.checkpoint ? (
             <section className="operator-gate card-panel" aria-label="Operator decision gate">
               <p className="obs-eyebrow">Round {view.checkpoint.roundNumber} Complete</p>
               <h2>Awaiting Operator</h2>
               <p className="gate-recommendation">
-                Coordinator recommends: <strong>{view.checkpoint.recommendation.toUpperCase()}</strong>
+                Coordinator recommends:{' '}
+                <strong>{view.checkpoint.recommendation.toUpperCase()}</strong>
               </p>
-              <pre className="obs-report">{view.checkpoint.body}</pre>
               <label className="gate-guidance">
-                Guidance for next round (optional)
+                Guidance for next consultation (optional)
                 <textarea
                   value={guidance}
                   disabled={gateBusy}
@@ -353,6 +421,8 @@ export function DebateWorkspace(input: {
               </div>
             </section>
           ) : null}
+
+          <ContributionsPanel contributions={view.contributions} />
 
           <section className="obs-team">
             <header className="obs-section-head">
@@ -373,7 +443,9 @@ export function DebateWorkspace(input: {
           <TranscriptPanel messages={view.transcript} />
         </>
       )}
-    </section>
+      {showingFinal ? (
+        <ContributionsPanel contributions={view.contributions} />
+      ) : null}    </section>
   );
 }
 

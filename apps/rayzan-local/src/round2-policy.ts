@@ -69,33 +69,57 @@ export function composeRoundWatcherBody(
   commonEvidence: string,
   challenge: string,
 ): string {
+  // Thin mechanical framing only. The Coordinator owns question, format, and depth.
+  const evidence = commonEvidence.trim();
   return `ROLE
 ====
-You are ${watcherName}, a Watcher in Round ${roundNumber}.
+You are ${watcherName}, a Watcher in consultation Round ${roundNumber}.
 
-${commonEvidence}
+Answer the Coordinator's request below. Follow any format or depth constraints exactly.
+Do not reveal hidden chain-of-thought.
 
-COORDINATOR CHALLENGE
-=====================
-${challenge}
+${evidence ? `${evidence}\n\n` : ''}COORDINATOR REQUEST
+===================
+${challenge}`;
+}
 
-ROUND ${roundNumber} RESPONSE CONTRACT
-======================================
-Perform fresh, substantive analysis. Do not merely summarize Round 1 or narrate
-your private reasoning. Preserve the Operator's requested deliverable and stated
-constraints. Respond with clear, direct reasoning under these sections:
+export interface ForwardSourceBlock {
+  readonly authorName: string;
+  readonly body: string;
+}
 
-A. Current position and what changed, if anything
-B. Response to the other agents' strongest relevant points
-C. Strongest challenge to your own position
-D. Reassessment from first principles or evidence
-E. New idea, approach, test, or deliverable improvement
-F. Key tradeoffs and risks
-G. Response to any Operator intervention in the evidence
-H. Recommendation and the most usable candidate deliverable you can provide now
+/** Build a Watcher-visible forward payload with verbatim provenance. */
+export function composeForwardWatcherBody(
+  roundNumber: number,
+  watcherName: string,
+  sources: readonly ForwardSourceBlock[],
+  instruction?: string,
+): string {
+  if (sources.length === 0) {
+    throw new OrchestratorError('forward requires at least one source message');
+  }
+  const sourceBlocks = sources
+    .map(
+      (source) => `${source.authorName}:
+${source.body}`,
+    )
+    .join('\n\n');
+  const instructionBlock =
+    instruction && instruction.trim().length > 0
+      ? `\n\nCOORDINATOR REQUEST
+===================
+${instruction.trim()}`
+      : '';
+  return `ROLE
+====
+You are ${watcherName}, a Watcher in consultation Round ${roundNumber}.
 
-If an item is not applicable, say why rather than omitting it. Do not reveal
-hidden chain-of-thought, dispatch metadata, or a mechanical message log.`;
+The following evidence is forwarded verbatim. Authorship is preserved.
+Do not reveal hidden chain-of-thought.
+
+SOURCE
+======
+${sourceBlocks}${instructionBlock}`;
 }
 
 export function mergeReferencedMessageIds(
@@ -111,6 +135,10 @@ export function mergeReferencedMessageIds(
   return Object.freeze(merged);
 }
 
+/**
+ * Extract selective Watcher challenges from a Coordinator dispatch batch.
+ * One dispatch may target one or many Watchers; not every Watcher must appear.
+ */
 export function watcherChallengesFromBatch(input: {
   readonly batch: CoordinatorCommandBatch;
   readonly watchers: readonly Agent[];
@@ -118,54 +146,45 @@ export function watcherChallengesFromBatch(input: {
   const dispatches = input.batch.commands.filter(
     (command): command is DispatchCommand => command.type === 'dispatch',
   );
-  if (dispatches.length !== input.batch.commands.length) {
+  if (dispatches.length === 0) {
     throw new OrchestratorError(
-      'Round 2 Coordinator plan must contain only dispatch commands',
+      'Coordinator action must contain at least one dispatch, or a checkpoint',
     );
   }
-  if (dispatches.length !== input.watchers.length) {
+  if (dispatches.length !== input.batch.commands.length) {
     throw new OrchestratorError(
-      `Round 2 Coordinator plan must contain exactly one dispatch per Watcher (${input.watchers.length})`,
+      'dispatch batches cannot mix non-dispatch commands',
     );
   }
 
-  const remaining = new Map(
-    input.watchers.map((watcher) => [watcher.id, watcher]),
-  );
+  const byId = new Map(input.watchers.map((watcher) => [watcher.id, watcher]));
   const challenges: WatcherChallenge[] = [];
 
   for (const command of dispatches) {
-    if (command.recipients.type !== 'explicit-agents') {
-      throw new OrchestratorError(
-        'Round 2 dispatch recipients must be explicit-agents with one Watcher',
-      );
-    }
-    if (command.recipients.agentIds.length !== 1) {
-      throw new OrchestratorError(
-        'Round 2 dispatch must target exactly one Watcher',
-      );
-    }
-    const agentId = command.recipients.agentIds[0]!;
-    const watcher = remaining.get(agentId);
-    if (watcher === undefined) {
-      throw new OrchestratorError(
-        `Round 2 dispatch recipient is not an unused Round 1 Watcher: ${agentId}`,
-      );
-    }
-    remaining.delete(agentId);
-    challenges.push({
-      agentId: watcher.id,
-      name: watcher.name,
-      messageId: command.messageId,
-      challenge: command.body,
-      referencedMessageIds: command.referencedMessageIds,
-    });
-  }
+    const recipientIds =
+      command.recipients.type === 'explicit-agents'
+        ? command.recipients.agentIds
+        : input.watchers.map((watcher) => watcher.id);
 
-  if (remaining.size > 0) {
-    throw new OrchestratorError(
-      'Round 2 Coordinator plan is missing a Watcher dispatch',
-    );
+    if (recipientIds.length === 0) {
+      throw new OrchestratorError('dispatch recipients cannot be empty');
+    }
+
+    for (const agentId of recipientIds) {
+      const watcher = byId.get(agentId);
+      if (watcher === undefined) {
+        throw new OrchestratorError(
+          `dispatch recipient is not an active Watcher: ${agentId}`,
+        );
+      }
+      challenges.push({
+        agentId: watcher.id,
+        name: watcher.name,
+        messageId: command.messageId,
+        challenge: command.body,
+        referencedMessageIds: command.referencedMessageIds,
+      });
+    }
   }
 
   return Object.freeze(challenges);

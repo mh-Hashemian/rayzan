@@ -92,6 +92,11 @@ export interface ReplayTarget {
   storeCheckpoint?(checkpoint: CoordinatorCheckpoint): void;
   hydrateMessage(message: MessageEnvelope): void;
   hydrateDelivery(delivery: OutboundDelivery): void;
+  quarantineDelivery?(
+    deliveryId: string,
+    reason: 'IN_DOUBT' | 'SUPERSEDED' | 'FAILED',
+    detail?: string,
+  ): void;
   getDelivery(id: string): OutboundDelivery | undefined;
   setDeliveryStatus(id: string, status: DeliveryStatus): void;
   restoreRoundExecution(
@@ -274,12 +279,17 @@ export class EventReplayer {
           return this.#deliveryCreated(event, target);
         case 'DELIVERY_CONFIRMED':
           return this.#deliveryConfirmed(event, target);
+        case 'DELIVERY_QUARANTINED':
+          return this.#deliveryQuarantined(event, target);
         case 'RESPONSE_CAPTURED':
           return this.#responseCaptured(event, target);
         case 'EXPOSURE_CREATED':
           return this.#exposureCreated(event, target);
         case 'ROUND_COMPLETED':
           return this.#roundCompleted(event, target);
+        case 'COORDINATOR_ACTION_CREATED':
+        case 'COORDINATOR_OPERATOR_QUESTION_CREATED':
+          return { kind: 'applied' };
         case 'COORDINATOR_CHECKPOINT_CREATED':
           return this.#checkpointCreated(event, target);
         case 'SYNTHESIS_CREATED':
@@ -289,6 +299,7 @@ export class EventReplayer {
         case 'PROMPT_DISPATCH_FAILED':
         case 'CAPTURE_REQUESTED':
         case 'CAPTURE_FAILED':
+        case 'CAPTURE_SALVAGED_BY_OPERATOR':
           return { kind: 'applied' };
         case 'OPERATOR_INTERVENTION':
         case 'DEBATE_CONTINUED':
@@ -559,6 +570,33 @@ export class EventReplayer {
     if (roundId !== undefined && target.hasRoundExecution(roundId)) {
       target.noteRoundConfirmed(roundId, deliveryId);
     }
+    return { kind: 'applied' };
+  }
+
+  #deliveryQuarantined(event: Event, target: ReplayTarget): ApplyOutcome {
+    const payload = asPayload(event.payload);
+    const deliveryId = stringField(payload, 'deliveryId');
+    const reason = stringField(payload, 'reason');
+    if (deliveryId === undefined || reason === undefined) {
+      return historical('DELIVERY_QUARANTINED lacks deliveryId or reason');
+    }
+    if (
+      reason !== 'IN_DOUBT' &&
+      reason !== 'SUPERSEDED' &&
+      reason !== 'FAILED'
+    ) {
+      return integrity(`invalid quarantine reason: ${reason}`);
+    }
+    if (target.getDelivery(deliveryId) === undefined) {
+      return historical(
+        `DELIVERY_QUARANTINED for unknown delivery ${deliveryId}`,
+      );
+    }
+    target.quarantineDelivery?.(
+      deliveryId,
+      reason,
+      stringField(payload, 'detail'),
+    );
     return { kind: 'applied' };
   }
 

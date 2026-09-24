@@ -9,12 +9,19 @@ import {
 } from '@rayzan/protocol';
 
 import {
+  CHECKPOINT_RECOMMENDATIONS,
+  COORDINATOR_ACTION_MODES,
   COORDINATOR_COMMAND_PROTOCOL_VERSION,
+  type AskOperatorCommand,
+  type CheckpointCommand,
+  type CheckpointRecommendation,
   type CompleteRoundCommand,
+  type CoordinatorActionMode,
   type CoordinatorCommand,
   type CoordinatorCommandBatch,
   type DispatchCommand,
   type FinalizeDebateCommand,
+  type ForwardCommand,
 } from './coordinator-command.js';
 import type { RecipientSelector } from './dispatch-plan.js';
 import { OrchestratorError } from './error.js';
@@ -47,7 +54,7 @@ export function parseCoordinatorCommandBatch(
 
   if (!Object.hasOwn(root, 'commands')) {
     throw new OrchestratorError(
-      'coordinator command batch is missing commands',
+      'coordinator command batch commands must be an array',
     );
   }
   if (!Array.isArray(root.commands)) {
@@ -67,10 +74,47 @@ export function parseCoordinatorCommandBatch(
     ),
   );
 
+  assertExclusiveActionSemantics(commands);
+
   return Object.freeze({
     version: COORDINATOR_COMMAND_PROTOCOL_VERSION,
     commands,
   });
+}
+
+function assertExclusiveActionSemantics(
+  commands: readonly CoordinatorCommand[],
+): void {
+  const modes = new Set<CoordinatorActionMode>();
+  for (const command of commands) {
+    if (
+      (COORDINATOR_ACTION_MODES as readonly string[]).includes(command.type)
+    ) {
+      modes.add(command.type as CoordinatorActionMode);
+    }
+  }
+
+  if (modes.size > 1) {
+    throw new OrchestratorError(
+      `a Coordinator step may contain only one action mode; found ${[...modes].join(' + ')}`,
+    );
+  }
+
+  const mode = [...modes][0];
+  if (mode === 'checkpoint') {
+    if (commands.length !== 1) {
+      throw new OrchestratorError(
+        'checkpoint must be the only command in the batch',
+      );
+    }
+  }
+  if (mode === 'ask_operator') {
+    if (commands.length !== 1) {
+      throw new OrchestratorError(
+        'ask_operator must be the only command in the batch',
+      );
+    }
+  }
 }
 
 function parseCommand(value: unknown, field: string): CoordinatorCommand {
@@ -79,6 +123,15 @@ function parseCommand(value: unknown, field: string): CoordinatorCommand {
 
   if (type === 'dispatch') {
     return parseDispatchCommand(command, field);
+  }
+  if (type === 'forward') {
+    return parseForwardCommand(command, field);
+  }
+  if (type === 'ask_operator') {
+    return parseAskOperatorCommand(command, field);
+  }
+  if (type === 'checkpoint') {
+    return parseCheckpointCommand(command, field);
   }
   if (type === 'complete-round') {
     return parseCompleteRoundCommand(command, field);
@@ -109,12 +162,27 @@ function parseDispatchCommand(
     field,
   );
 
+  const messageId = optionalId(
+    command.messageId,
+    `${field}.messageId`,
+    asMessageId,
+    'pending-message',
+  );
+  const debateId = optionalId(
+    command.debateId,
+    `${field}.debateId`,
+    asDebateId,
+    'pending-debate',
+  );
+
   const parsed: DispatchCommand = {
     type: 'dispatch',
-    messageId: requireId(command.messageId, `${field}.messageId`, asMessageId),
-    debateId: requireId(command.debateId, `${field}.debateId`, asDebateId),
+    messageId,
+    debateId,
     recipients: parseRecipients(command.recipients, `${field}.recipients`),
-    kind: parseMessageKind(command.kind, `${field}.kind`),
+    kind: Object.hasOwn(command, 'kind')
+      ? parseMessageKind(command.kind, `${field}.kind`)
+      : 'query',
     body: requireNonEmptyBody(command.body, `${field}.body`),
     referencedMessageIds: parseReferencedMessageIds(
       command.referencedMessageIds,
@@ -122,7 +190,7 @@ function parseDispatchCommand(
     ),
   };
 
-  if (Object.hasOwn(command, 'roundId')) {
+  if (Object.hasOwn(command, 'roundId') && command.roundId !== undefined) {
     return Object.freeze({
       ...parsed,
       roundId: requireId(command.roundId, `${field}.roundId`, asRoundId),
@@ -130,6 +198,163 @@ function parseDispatchCommand(
   }
 
   return Object.freeze(parsed);
+}
+
+function parseForwardCommand(
+  command: Record<string, unknown>,
+  field: string,
+): ForwardCommand {
+  rejectUnknownKeys(
+    command,
+    [
+      'type',
+      'messageId',
+      'debateId',
+      'roundId',
+      'recipients',
+      'sourceRefs',
+      'sourceMessageIds',
+      'instruction',
+    ],
+    field,
+  );
+
+  const sourceRefs = parseStringList(
+    command.sourceRefs,
+    `${field}.sourceRefs`,
+    true,
+  );
+  const sourceMessageIds = parseReferencedMessageIds(
+    command.sourceMessageIds,
+    `${field}.sourceMessageIds`,
+  );
+  if (sourceRefs.length === 0 && sourceMessageIds.length === 0) {
+    throw new OrchestratorError(
+      `${field} requires sourceRefs or sourceMessageIds`,
+    );
+  }
+
+  let instruction: string | undefined;
+  if (Object.hasOwn(command, 'instruction') && command.instruction !== undefined) {
+    instruction = requireNonEmptyBody(
+      command.instruction,
+      `${field}.instruction`,
+    );
+  }
+
+  const parsed: ForwardCommand = {
+    type: 'forward',
+    messageId: optionalId(
+      command.messageId,
+      `${field}.messageId`,
+      asMessageId,
+      'pending-message',
+    ),
+    debateId: optionalId(
+      command.debateId,
+      `${field}.debateId`,
+      asDebateId,
+      'pending-debate',
+    ),
+    recipients: parseRecipients(command.recipients, `${field}.recipients`),
+    sourceRefs,
+    sourceMessageIds,
+    ...(instruction !== undefined ? { instruction } : {}),
+  };
+
+  if (Object.hasOwn(command, 'roundId') && command.roundId !== undefined) {
+    return Object.freeze({
+      ...parsed,
+      roundId: requireId(command.roundId, `${field}.roundId`, asRoundId),
+    });
+  }
+
+  return Object.freeze(parsed);
+}
+
+function parseAskOperatorCommand(
+  command: Record<string, unknown>,
+  field: string,
+): AskOperatorCommand {
+  rejectUnknownKeys(
+    command,
+    ['type', 'debateId', 'roundId', 'question'],
+    field,
+  );
+
+  return Object.freeze({
+    type: 'ask_operator',
+    debateId: optionalId(
+      command.debateId,
+      `${field}.debateId`,
+      asDebateId,
+      'pending-debate',
+    ),
+    roundId: optionalId(
+      command.roundId,
+      `${field}.roundId`,
+      asRoundId,
+      'pending-round',
+    ),
+    question: requireNonEmptyBody(command.question, `${field}.question`),
+  });
+}
+
+function parseCheckpointCommand(
+  command: Record<string, unknown>,
+  field: string,
+): CheckpointCommand {
+  rejectUnknownKeys(
+    command,
+    ['type', 'debateId', 'roundId', 'content', 'body', 'recommendation'],
+    field,
+  );
+
+  const contentRaw = Object.hasOwn(command, 'content')
+    ? command.content
+    : command.body;
+  const recommendationRaw = requireString(
+    command.recommendation,
+    `${field}.recommendation`,
+  ).trim();
+  const recommendation = normalizeRecommendation(recommendationRaw, field);
+
+  return Object.freeze({
+    type: 'checkpoint',
+    debateId: optionalId(
+      command.debateId,
+      `${field}.debateId`,
+      asDebateId,
+      'pending-debate',
+    ),
+    roundId: optionalId(
+      command.roundId,
+      `${field}.roundId`,
+      asRoundId,
+      'pending-round',
+    ),
+    content: requireNonEmptyBody(contentRaw, `${field}.content`),
+    recommendation,
+  });
+}
+
+function normalizeRecommendation(
+  value: string,
+  field: string,
+): CheckpointRecommendation {
+  const lower = value.toLowerCase();
+  if ((CHECKPOINT_RECOMMENDATIONS as readonly string[]).includes(lower)) {
+    return lower as CheckpointRecommendation;
+  }
+  if (lower === 'finish' || /^finish\b/i.test(value)) {
+    return 'finish';
+  }
+  if (lower === 'continue' || /^continue\b/i.test(value)) {
+    return 'continue';
+  }
+  throw new OrchestratorError(
+    `${field}.recommendation must be FINISH or CONTINUE`,
+  );
 }
 
 function parseCompleteRoundCommand(
@@ -215,6 +440,33 @@ function parseReferencedMessageIds(
   return Object.freeze(referencedMessageIds);
 }
 
+function parseStringList(
+  value: unknown,
+  field: string,
+  optional: boolean,
+): readonly string[] {
+  if (value === undefined || value === null) {
+    if (optional) {
+      return Object.freeze([]);
+    }
+    throw new OrchestratorError(`${field} must be an array`);
+  }
+  if (!Array.isArray(value)) {
+    throw new OrchestratorError(`${field} must be an array`);
+  }
+  const items = value.map((item, index) => {
+    const text = requireString(item, `${field}[${index}]`).trim();
+    if (text.length === 0) {
+      throw new OrchestratorError(`${field}[${index}] cannot be empty`);
+    }
+    return text;
+  });
+  if (new Set(items).size !== items.length) {
+    throw new OrchestratorError(`duplicate ${field} values`);
+  }
+  return Object.freeze(items);
+}
+
 function parseMessageKind(value: unknown, field: string): MessageKind {
   const kind = requireString(value, field);
   if (!(MESSAGE_KINDS as readonly string[]).includes(kind)) {
@@ -259,6 +511,18 @@ function requireId<T extends string>(
   } catch {
     throw new OrchestratorError(`${field} cannot be empty`);
   }
+}
+
+function optionalId<T extends string>(
+  value: unknown,
+  field: string,
+  asId: (value: string) => T,
+  placeholder: string,
+): T {
+  if (value === undefined || value === null || value === '') {
+    return asId(placeholder);
+  }
+  return requireId(value, field, asId);
 }
 
 function rejectUnknownKeys(

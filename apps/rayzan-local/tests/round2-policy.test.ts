@@ -60,31 +60,31 @@ describe('Round 2 common-evidence policy', () => {
     );
     assert.equal(qwenBody.includes(common), true);
     assert.equal(glmBody.includes(common), true);
-    assert.match(qwenBody, /You are Qwen, a Watcher in Round 2/);
+    assert.match(qwenBody, /You are Qwen, a Watcher in consultation Round 2/);
     assert.match(glmBody, /Challenge GLM/);
-    assert.match(qwenBody, /ROUND 2 RESPONSE CONTRACT/);
-    assert.match(qwenBody, /Fresh, substantive analysis/i);
-    assert.match(qwenBody, /Strongest challenge to your own position/);
+    assert.match(qwenBody, /COORDINATOR REQUEST/);
+    assert.equal(qwenBody.includes('RESPONSE CONTRACT'), false);
+    assert.equal(qwenBody.includes('Strongest challenge to your own position'), false);
     assert.equal(qwenBody.includes('Challenge GLM.'), false);
   });
 
-  it('uses substantive prompt contracts without changing the debate topology', () => {
+  it('leaves intellectual format to the Coordinator instead of forced templates', () => {
     const round1 = coordinatorRound1Prompt({
-      problem: 'Design a Rayzan logo with a usable SVG deliverable.',
+      problem: 'Every Watcher should reply with exactly one random word.',
       coordinatorId: 'coordinator',
       debateId: 'debate-1',
       roundId: 'round-1',
       watchers: [qwen, glm],
     });
     const challenge = coordinatorRoundPrompt({
-      problem: 'Design a Rayzan logo with a usable SVG deliverable.',
+      problem: 'Every Watcher should reply with exactly one random word.',
       coordinatorId: 'coordinator',
       debateId: 'debate-1',
       roundId: 'round-2',
       roundNumber: 2,
       watchers: [qwen, glm],
       evidencePacket: 'Watcher evidence.',
-      intervention: 'Make it accessible.',
+      intervention: 'Keep it one word.',
     });
     const checkpoint = coordinatorCheckpointPrompt({
       coordinatorId: 'coordinator',
@@ -99,15 +99,16 @@ describe('Round 2 common-evidence policy', () => {
       evidencePacket: 'Watcher evidence.',
     });
 
-    assert.match(round1, /multiple viable approaches/i);
-    assert.match(round1, /candidate deliverable/i);
-    assert.match(challenge, /strongest opposing argument/i);
-    assert.match(challenge, /Operator Deliverable Contract/);
-    assert.match(checkpoint, /# Coordinator's Current Judgment/);
-    assert.match(checkpoint, /Markdown comparison table/i);
-    assert.match(checkpoint, /Coordinator recommendation: FINISH \| CONTINUE/);
-    assert.match(synthesis, /# Coordinator's Final Judgment/);
-    assert.match(synthesis, /fullest usable final artifact/i);
+    assert.match(round1, /intellectual orchestrator/i);
+    assert.match(round1, /RAYZAN ACTIONS/);
+    assert.match(round1, /Actions in the same step are parallel/i);
+    assert.equal(/multiple viable approaches/i.test(round1), false);
+    assert.equal(/exactly one dispatch command per Watcher/i.test(round1), false);
+    assert.match(challenge, /decide the next Rayzan action/i);
+    assert.match(challenge, /FORWARD/i);
+    assert.match(challenge, /ASK_OPERATOR/i);
+    assert.match(checkpoint, /checkpoint command/i);
+    assert.match(synthesis, /actual artifact/i);
   });
 
   it('augments omitted Coordinator references with both Round 1 response ids', () => {

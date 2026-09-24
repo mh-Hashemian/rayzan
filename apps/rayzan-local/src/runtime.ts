@@ -17,6 +17,7 @@ import {
   createRound,
   isOpenDebateStatus,
   withDebateStatus,
+  createMessageEnvelope,
   InMemoryAgentRegistry,
   InMemoryDebateStore,
   InMemoryExposureLedgerStore,
@@ -48,6 +49,7 @@ import {
   parseCoordinatorCommandBatch,
   RoundWorkflow,
   type CoordinatorCommandBatch,
+  type DispatchIntent,
   type ReplayResult,
   type ReplayTarget,
 } from '@rayzan/orchestrator';
@@ -57,12 +59,15 @@ import {
   coordinatorRoundPrompt,
   coordinatorRound2Prompt,
   coordinatorCheckpointPrompt,
+  coordinatorActionPrompt,
   coordinatorSynthesisPrompt,
   unwrapCoordinatorJson,
+  looksLikeTruncatedCoordinatorJson,
 } from './coordinator-prompt.js';
 import { OPERATOR_ID } from './demo-ids.js';
 import { DEFAULT_TEAM } from './default-team.js';
 import {
+  composeForwardWatcherBody,
   composeRoundWatcherBody,
   mergeReferencedMessageIds,
   round1EvidencePacket,
@@ -70,9 +75,21 @@ import {
   type AttributedWatcherResponse,
   type WatcherChallenge,
 } from './round2-policy.js';
+import {
+  buildEvidenceCatalog,
+  formatEvidenceCatalog,
+  resolveEvidenceRefs,
+} from './evidence-catalog.js';
 
 export type AgentPhase =
-  'idle' | 'waiting' | 'sending' | 'generating' | 'captured' | 'error';
+  | 'idle'
+  | 'waiting'
+  | 'sending'
+  | 'generating'
+  | 'capturing'
+  | 'captured'
+  | 'attention'
+  | 'error';
 
 export interface PendingBrowserJob {
   readonly deliveryId: string;
@@ -95,6 +112,11 @@ export interface BrowserCaptureState {
   readonly trackedConnected?: boolean;
   readonly textLength?: number;
   readonly posted?: boolean;
+  /** Debug-only capture-boundary timestamps/flags (milliseconds / booleans). */
+  readonly generationEndedAt?: number;
+  readonly capturedAt?: number;
+  readonly domChangedAfterTerminal?: boolean;
+  readonly domChangedAfterCapture?: boolean;
 }
 
 export interface AgentPresence {
@@ -105,6 +127,211 @@ export interface AgentPresence {
   readonly lastSeen: number;
   readonly diagnostics?: unknown;
   readonly capture?: BrowserCaptureState;
+}
+
+// ---------------------------------------------------------------------------
+// Provider debug observatory (ephemeral, never persisted, never events).
+// Durable delivery/action state comes from the runtime; ephemeral browser
+// state is pushed in by the managed Electron browser via noteManagedDebugState.
+// ---------------------------------------------------------------------------
+
+export type DebugSessionState =
+  | 'connected'
+  | 'restoring'
+  | 'connecting'
+  | 'logged_out'
+  | 'error'
+  | 'not_connected'
+  | 'unknown';
+
+export type DebugPageState =
+  | 'ready'
+  | 'loading'
+  | 'navigating'
+  | 'hidden'
+  | 'error'
+  | 'none'
+  | 'unknown';
+
+export type DebugDeliveryState =
+  | 'none'
+  | 'pending'
+  | 'sending'
+  | 'submitted'
+  | 'awaiting_response'
+  | 'in_doubt'
+  | 'responded'
+  | 'failed';
+
+export type DebugSendState =
+  | 'unknown'
+  | 'idle'
+  | 'preparing'
+  | 'composer_ready'
+  | 'submitting'
+  | 'accepted'
+  | 'failed';
+
+export type DebugAssistantTurnState = 'none' | 'waiting_for_new' | 'detected';
+
+export type DebugGenerationState = 'idle' | 'active' | 'ended' | 'unknown';
+
+export type DebugCaptureState =
+  | 'idle'
+  | 'waiting'
+  | 'reading'
+  | 'captured'
+  | 'failed';
+
+export type DebugCoordinatorProtocolState =
+  | 'not_applicable'
+  | 'not_started'
+  | 'parsing'
+  | 'valid'
+  | 'invalid';
+
+/** Ephemeral per-provider browser state pushed by the managed Electron host. */
+export interface ManagedProviderDebugState {
+  readonly providerId: string;
+  readonly session?: {
+    readonly state: DebugSessionState;
+    readonly detail?: string;
+    readonly loggedIn?: boolean;
+  };
+  readonly page?: {
+    readonly state: DebugPageState;
+    readonly url?: string;
+    readonly visible?: boolean;
+  };
+  readonly conversation?: {
+    readonly state: 'ready' | 'none' | 'unknown';
+    readonly conversationId?: string;
+  };
+  readonly send?: { readonly state: DebugSendState; readonly error?: string };
+  readonly generation?: { readonly state: DebugGenerationState };
+  readonly probe?: {
+    readonly hasComposer?: boolean;
+    readonly hasSend?: boolean;
+    readonly generating?: boolean;
+    readonly url?: string;
+    readonly title?: string;
+  };
+  readonly lastError?: string;
+  readonly lastChangedAt?: number;
+  readonly transitions?: readonly {
+    readonly at: number;
+    readonly label: string;
+    readonly detail?: string;
+  }[];
+}
+
+export interface ManagedDebugPush {
+  readonly pushedAt: number;
+  readonly restoring: boolean;
+  readonly sendTraceEnabled: boolean;
+  readonly providers: readonly ManagedProviderDebugState[];
+}
+
+export interface DebugTransition {
+  readonly at: number;
+  readonly agentId?: string;
+  readonly label: string;
+  readonly detail?: string;
+}
+
+export interface DebugPipelineStage {
+  readonly stage: string;
+  readonly state: 'not_started' | 'active' | 'completed' | 'failed';
+  readonly at?: string;
+  readonly detail?: string;
+}
+
+export interface DebugProviderCard {
+  readonly agentId: string;
+  readonly providerId: string;
+  readonly label: string;
+  readonly role: string | undefined;
+  readonly managed: boolean;
+  readonly session: { readonly state: DebugSessionState; readonly detail?: string };
+  readonly page: { readonly state: DebugPageState; readonly url?: string };
+  readonly conversation: {
+    readonly state: 'ready' | 'none' | 'unknown';
+    readonly conversationId?: string;
+  };
+  readonly delivery: {
+    readonly state: DebugDeliveryState;
+    readonly deliveryId?: string;
+    readonly error?: string;
+  };
+  readonly send: { readonly state: DebugSendState; readonly error?: string };
+  readonly assistantTurn: { readonly state: DebugAssistantTurnState };
+  readonly generation: { readonly state: DebugGenerationState };
+  readonly capture: {
+    readonly state: DebugCaptureState;
+    readonly reason?: string;
+    readonly textLength?: number;
+    readonly preSendTurnCount?: number;
+    readonly currentTurnCount?: number;
+    readonly trackedIdentity?: string;
+    readonly generationEndedAt?: number;
+    readonly capturedAt?: number;
+    readonly domChangedAfterTerminal?: boolean;
+    readonly domChangedAfterCapture?: boolean;
+  };
+  readonly coordinatorProtocol: {
+    readonly state: DebugCoordinatorProtocolState;
+    readonly error?: string;
+    readonly stepIndex?: number;
+    readonly action?: string;
+  };
+  readonly presencePhase: string;
+  readonly lastError?: string;
+  readonly lastChangedAt?: string;
+  readonly pipeline: readonly DebugPipelineStage[];
+  readonly transitions: readonly {
+    readonly at: string;
+    readonly label: string;
+    readonly detail?: string;
+  }[];
+  readonly details: {
+    readonly windowVisible?: boolean;
+    readonly restoreActive?: boolean;
+    readonly sendTraceEnabled?: boolean;
+    readonly url?: string;
+    readonly pageUrl?: string;
+    readonly probeUrl?: string;
+    readonly hasComposer?: boolean;
+    readonly hasSend?: boolean;
+    readonly probeGenerating?: boolean;
+    readonly bindingState?: string;
+    readonly lastSeen?: string;
+  };
+}
+
+export interface DebugProvidersView {
+  readonly now: string;
+  readonly restoring: boolean;
+  readonly sendTraceEnabled: boolean;
+  readonly providers: readonly DebugProviderCard[];
+  readonly activeCoordinatorAction: {
+    readonly stepIndex: number;
+    readonly action?: string;
+    readonly deliveryIds?: readonly string[];
+    readonly pendingDeliveryIds: readonly string[];
+    readonly decisionPending: boolean;
+    readonly awaitingOperator: boolean;
+    readonly operatorQuestion?: {
+      readonly question: string;
+      readonly createdAt: string;
+    };
+  } | null;
+  readonly recentTransitions: readonly {
+    readonly at: string;
+    readonly source: string;
+    readonly agentId?: string;
+    readonly label: string;
+    readonly detail?: string;
+  }[];
 }
 
 export interface DebateView {
@@ -152,6 +379,14 @@ export interface RayzanSnapshot {
     readonly createdAt: string;
   };
   readonly awaitingOperator: boolean;
+  /** Pending Coordinator ask_operator question (same round; not a checkpoint). */
+  readonly operatorQuestion?: {
+    readonly debateId: string;
+    readonly roundId: string;
+    readonly roundNumber: number;
+    readonly question: string;
+    readonly createdAt: string;
+  };
   readonly agents: readonly {
     readonly id: string;
     readonly name: string;
@@ -245,7 +480,29 @@ export interface RayzanSnapshot {
     readonly recipientIds: readonly string[];
     readonly kind: string;
     readonly body: string;
+    readonly roundId?: string;
   }[];
+  readonly watcherContributions: readonly {
+    readonly agentId: string;
+    readonly name: string;
+    readonly provider?: string;
+    readonly roundNumber: number;
+    readonly prompt: string;
+    readonly response?: string;
+  }[];
+  readonly coordinatorAction?: {
+    readonly stepIndex: number;
+    readonly pendingDeliveryIds: readonly string[];
+    readonly terminalDeliveryIds?: readonly string[];
+    readonly decisionPending: boolean;
+    readonly latestAction?: {
+      readonly stepIndex: number;
+      readonly action: string;
+      readonly deliveryIds?: readonly string[];
+    };
+    readonly roundStatus?: string;
+    readonly awaitingOperator?: boolean;
+  };
   readonly replay: ReplayResult;
 }
 
@@ -273,6 +530,24 @@ export class RayzanRuntime {
   #round2Dispatched = false;
   #synthesisQueued = false;
   #checkpointQueued = false;
+  /** Delivery IDs from the current Coordinator action step awaiting responses. */
+  #pendingStepDeliveryIds = new Set<string>();
+  /**
+   * Exact Coordinator prompt delivery the capture layer must resolve.
+   * Never “newest awaiting” — correlation is this id for the active debate.
+   */
+  #pendingCoordinatorDeliveryId: string | undefined;
+  #coordinatorStepIndex = 0;
+  #coordinatorDecisionPending = false;
+  /** Pending ask_operator question for the active consultation round. */
+  #pendingOperatorQuestion:
+    | {
+        readonly debateId: string;
+        readonly roundId: string;
+        readonly question: string;
+        readonly createdAt: string;
+      }
+    | undefined;
   #seq = 0;
   #log: string[] = [];
   #lastError: string | undefined;
@@ -297,6 +572,21 @@ export class RayzanRuntime {
   #eventListeners = new Set<(event: Event) => void>();
   #participation = new Map<string, boolean>();
   #agentProviders = new Map<string, string>();
+  // Debug observatory — in-memory only; never persisted, never emitted.
+  #managedDebug = new Map<string, ManagedProviderDebugState>();
+  #managedDebugMeta: { pushedAt?: number; restoring?: boolean; sendTraceEnabled?: boolean } =
+    {};
+  #debugTransitions: DebugTransition[] = [];
+  #coordinatorProtocolDebug:
+    | {
+        readonly state: 'parsing' | 'valid' | 'invalid';
+        readonly at: number;
+        readonly deliveryId?: string;
+        readonly error?: string;
+        readonly stepIndex?: number;
+        readonly action?: string;
+      }
+    | undefined;
 
   constructor(events: EventStore = new InMemoryEventStore()) {
     // Fan every append (including Orchestrator emits) to SSE listeners so
@@ -562,7 +852,7 @@ export class RayzanRuntime {
         referencedMessageIds: [],
       }),
     );
-    this.orchestrator.dispatch(intent);
+    this.#dispatchTracked(intent);
     this.#coordinatorBriefSent = true;
     this.#record(
       'Operator → Coordinator Round 1 prompt queued (rephrase + Watcher roles).',
@@ -598,7 +888,7 @@ export class RayzanRuntime {
         referencedMessageIds: [],
       }),
     );
-    this.orchestrator.dispatch(intent);
+    this.#dispatchTracked(intent);
     this.#record(`Test message queued for ${agent.name} (${agent.id}).`);
   }
 
@@ -682,7 +972,8 @@ export class RayzanRuntime {
       (phase === 'sending' ||
       phase === 'captured' ||
       phase === 'waiting' ||
-      phase === 'generating'
+      phase === 'generating' ||
+      phase === 'capturing'
         ? undefined
         : previous?.error);
     this.#presence.set(agent.id, {
@@ -748,6 +1039,458 @@ export class RayzanRuntime {
         ...(phase === 'error' && error ? { error } : {}),
       });
     }
+    if (
+      !this.#freezeRestoredSideEffects &&
+      capture?.phase === 'failed' &&
+      capture.deliveryId
+    ) {
+      this.#debugTransition(
+        agent.id,
+        'capture-failed',
+        `${capture.deliveryId}: ${capture.reason ?? error ?? 'capture failed'}`,
+      );
+    }
+  }
+
+  /**
+   * Receive the latest ephemeral managed-browser debug state. Latest-wins,
+   * in-memory only; malformed payloads are ignored. This is not an event.
+   */
+  noteManagedDebugState(input: unknown): void {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+      return;
+    }
+    const record = input as Record<string, unknown>;
+    const providers = record.providers;
+    if (!Array.isArray(providers)) {
+      return;
+    }
+    for (const raw of providers) {
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+        continue;
+      }
+      const item = raw as Record<string, unknown>;
+      const providerId =
+        typeof item.providerId === 'string' ? item.providerId : undefined;
+      if (providerId === undefined || providerId.length === 0) {
+        continue;
+      }
+      this.#managedDebug.set(providerId, normalizeManagedDebugState(item));
+    }
+    this.#managedDebugMeta = {
+      ...(typeof record.pushedAt === 'number' ? { pushedAt: record.pushedAt } : {}),
+      ...(typeof record.restoring === 'boolean'
+        ? { restoring: record.restoring }
+        : {}),
+      ...(typeof record.sendTraceEnabled === 'boolean'
+        ? { sendTraceEnabled: record.sendTraceEnabled }
+        : {}),
+    };
+  }
+
+  /** Compose the /api/debug/providers observatory view. */
+  debugProviders(): DebugProvidersView {
+    const now = Date.now();
+    const agentIds = new Set<string>();
+    for (const agent of this.agents.list()) {
+      if (agent.role !== 'operator') {
+        agentIds.add(agent.id);
+      }
+    }
+    for (const providerId of this.#managedDebug.keys()) {
+      agentIds.add(providerId);
+    }
+    const providers = [...agentIds]
+      .sort()
+      .map((agentId) => this.#debugProviderCard(agentId, now));
+    const latestAction = this.#latestCoordinatorActionSummary();
+    const question = this.#pendingOperatorQuestionSnapshot();
+    const hasActiveConsultation = this.#activeConsultationRound() !== undefined;
+    const activeCoordinatorAction =
+      hasActiveConsultation || question || this.#awaitingOperator()
+        ? {
+            stepIndex: this.#coordinatorStepIndex,
+            ...(latestAction
+              ? {
+                  action: latestAction.action,
+                  ...(latestAction.deliveryIds
+                    ? { deliveryIds: latestAction.deliveryIds }
+                    : {}),
+                }
+              : {}),
+            pendingDeliveryIds: [...this.#pendingStepDeliveryIds],
+            decisionPending: this.#coordinatorDecisionPending,
+            awaitingOperator: this.#awaitingOperator(),
+            ...(question
+              ? {
+                  operatorQuestion: {
+                    question: question.question,
+                    createdAt: question.createdAt,
+                  },
+                }
+              : {}),
+          }
+        : null;
+    const recent = [
+      ...this.#debugTransitions.map((item) => ({
+        at: item.at,
+        source: 'runtime',
+        ...(item.agentId !== undefined ? { agentId: item.agentId } : {}),
+        label: item.label,
+        ...(item.detail !== undefined ? { detail: item.detail } : {}),
+      })),
+      ...[...this.#managedDebug.values()].flatMap((state) =>
+        (state.transitions ?? []).map((item) => ({
+          at: item.at,
+          source: 'managed',
+          agentId: state.providerId,
+          label: item.label,
+          ...(item.detail !== undefined ? { detail: item.detail } : {}),
+        })),
+      ),
+    ]
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 60);
+    return {
+      now: new Date(now).toISOString(),
+      restoring: this.#managedDebugMeta.restoring ?? false,
+      sendTraceEnabled: this.#managedDebugMeta.sendTraceEnabled ?? false,
+      providers,
+      activeCoordinatorAction,
+      recentTransitions: recent.map((item) => ({
+        at: new Date(item.at).toISOString(),
+        source: item.source,
+        ...(item.agentId !== undefined ? { agentId: item.agentId } : {}),
+        label: item.label,
+        ...(item.detail !== undefined ? { detail: item.detail } : {}),
+      })),
+    };
+  }
+
+  #debugTransition(
+    agentId: string | undefined,
+    label: string,
+    detail?: string,
+  ): void {
+    this.#debugTransitions.push({
+      at: Date.now(),
+      ...(agentId !== undefined ? { agentId } : {}),
+      label,
+      ...(detail !== undefined ? { detail } : {}),
+    });
+    if (this.#debugTransitions.length > 120) {
+      this.#debugTransitions.splice(0, this.#debugTransitions.length - 120);
+    }
+  }
+
+  #debugProviderCard(agentId: string, now: number): DebugProviderCard {
+    const agent = this.agents.getById(asAgentId(agentId));
+    const managed = this.#managedDebug.get(agentId);
+    const presence = this.#presence.get(agentId);
+    const debate = this.#focusDebate();
+    const deliveries = debate
+      ? this.transport
+          .listAll()
+          .filter(
+            (delivery) =>
+              delivery.recipientId === agentId &&
+              delivery.debateId === debate.id,
+          )
+      : [];
+    const latest = deliveries.at(-1);
+    const capture =
+      presence?.capture &&
+      (latest === undefined ||
+        presence.capture.deliveryId === undefined ||
+        presence.capture.deliveryId === latest.id)
+        ? presence.capture
+        : undefined;
+    const inDoubt =
+      latest &&
+      this.#replayResult.externalActions.some(
+        (action) =>
+          action.deliveryId === latest.id && action.state === 'IN_DOUBT',
+      );
+    const captureActive =
+      capture !== undefined &&
+      [
+        'snapshot',
+        'prompt-submitted',
+        'waiting-for-new-turn',
+        'generating',
+        'reading-final-response',
+      ].includes(capture.phase);
+    const captureFailed = capture?.phase === 'failed';
+    const deliveryError =
+      presence?.error ??
+      (captureFailed ? (capture?.reason ?? 'capture failed') : undefined);
+
+    let deliveryState: DebugDeliveryState;
+    if (latest === undefined) {
+      deliveryState = 'none';
+    } else if (captureFailed || presence?.phase === 'error') {
+      deliveryState = 'failed';
+    } else if (inDoubt) {
+      deliveryState = 'in_doubt';
+    } else if (latest.status === 'pending') {
+      deliveryState = presence?.phase === 'sending' ? 'sending' : 'pending';
+    } else if (latest.status === 'delivered') {
+      deliveryState = captureActive ? 'awaiting_response' : 'submitted';
+    } else {
+      deliveryState = 'responded';
+    }
+
+    const managedTransitions = managed?.transitions ?? [];
+    const sendError = managed?.send?.error;
+    const sendState: DebugSendState = managed?.send?.state ?? 'unknown';
+
+    let assistantTurn: DebugAssistantTurnState = 'none';
+    if (capture !== undefined) {
+      if (capture.phase === 'waiting-for-new-turn') {
+        assistantTurn =
+          capture.reason === 'new-turn-timeout' ? 'waiting_for_new' : 'waiting_for_new';
+      } else if (
+        capture.trackedIdentity !== undefined ||
+        [
+          'generating',
+          'reading-final-response',
+          'captured',
+          'failed',
+        ].includes(capture.phase)
+      ) {
+        assistantTurn = 'detected';
+      }
+    }
+
+    let generation: DebugGenerationState = 'unknown';
+    if (capture !== undefined) {
+      if (capture.phase === 'captured' || capture.phase === 'failed') {
+        generation = 'ended';
+      } else if (capture.phase === 'generating') {
+        generation = 'active';
+      } else if (capture.phase === 'reading-final-response') {
+        generation = 'ended';
+      } else {
+        generation = 'idle';
+      }
+    } else if (managed?.generation?.state) {
+      generation = managed.generation.state;
+    } else if (presence?.phase === 'generating') {
+      generation = 'active';
+    }
+
+    let captureView: DebugCaptureState = 'idle';
+    if (capture !== undefined) {
+      if (capture.phase === 'reading-final-response') {
+        captureView = 'reading';
+      } else if (capture.phase === 'captured') {
+        captureView = 'captured';
+      } else if (capture.phase === 'failed') {
+        captureView = 'failed';
+      } else {
+        captureView = 'waiting';
+      }
+    }
+
+    const coordinatorProtocol = this.#debugCoordinatorProtocol(agent, capture);
+
+    const lastChangedAt = Math.max(
+      presence?.lastSeen ?? 0,
+      managed?.lastChangedAt ?? 0,
+    );
+
+    return {
+      agentId,
+      providerId: managed?.providerId ?? agentId,
+      label: agent?.name ?? managed?.providerId ?? agentId,
+      role: agent?.role,
+      managed: managed !== undefined,
+      session: {
+        state: managed?.session?.state ?? 'unknown',
+        ...(managed?.session?.detail !== undefined
+          ? { detail: managed.session.detail }
+          : {}),
+      },
+      page: {
+        state: managed?.page?.state ?? 'unknown',
+        ...(managed?.page?.url !== undefined ? { url: managed.page.url } : {}),
+      },
+      conversation: {
+        state: managed?.conversation?.state ?? 'unknown',
+        ...(managed?.conversation?.conversationId !== undefined
+          ? { conversationId: managed.conversation.conversationId }
+          : {}),
+      },
+      delivery: {
+        state: deliveryState,
+        ...(latest !== undefined ? { deliveryId: latest.id } : {}),
+        ...(deliveryError !== undefined && deliveryState === 'failed'
+          ? { error: deliveryError }
+          : {}),
+      },
+      send: { state: sendState, ...(sendError !== undefined ? { error: sendError } : {}) },
+      assistantTurn: { state: assistantTurn },
+      generation: { state: generation },
+      capture: {
+        state: captureView,
+        ...(capture?.reason !== undefined ? { reason: capture.reason } : {}),
+        ...(capture?.textLength !== undefined
+          ? { textLength: capture.textLength }
+          : {}),
+        ...(capture?.preSendTurnCount !== undefined
+          ? { preSendTurnCount: capture.preSendTurnCount }
+          : {}),
+        ...(capture?.currentTurnCount !== undefined
+          ? { currentTurnCount: capture.currentTurnCount }
+          : {}),
+        ...(capture?.trackedIdentity !== undefined
+          ? { trackedIdentity: capture.trackedIdentity }
+          : {}),
+        ...(capture?.generationEndedAt !== undefined
+          ? { generationEndedAt: capture.generationEndedAt }
+          : {}),
+        ...(capture?.capturedAt !== undefined
+          ? { capturedAt: capture.capturedAt }
+          : {}),
+        ...(capture?.domChangedAfterTerminal !== undefined
+          ? { domChangedAfterTerminal: capture.domChangedAfterTerminal }
+          : {}),
+        ...(capture?.domChangedAfterCapture !== undefined
+          ? { domChangedAfterCapture: capture.domChangedAfterCapture }
+          : {}),
+      },
+      coordinatorProtocol,
+      presencePhase: presence?.phase ?? 'idle',
+      ...(presence?.error !== undefined || managed?.lastError !== undefined
+        ? { lastError: presence?.error ?? managed?.lastError }
+        : {}),
+      ...(lastChangedAt > 0 ? { lastChangedAt: new Date(lastChangedAt).toISOString() } : {}),
+      pipeline: this.#debugPipeline(agentId, managedTransitions),
+      transitions: managedTransitions
+        .slice(-20)
+        .reverse()
+        .map((item) => ({
+          at: new Date(item.at).toISOString(),
+          label: item.label,
+          ...(item.detail !== undefined ? { detail: item.detail } : {}),
+        })),
+      details: {
+        ...(managed?.page?.visible !== undefined
+          ? { windowVisible: managed.page.visible }
+          : {}),
+        restoreActive: this.#managedDebugMeta.restoring ?? false,
+        sendTraceEnabled: this.#managedDebugMeta.sendTraceEnabled ?? false,
+        ...(managed?.page?.url !== undefined ? { url: managed.page.url } : {}),
+        ...(managed?.probe?.url !== undefined ? { probeUrl: managed.probe.url } : {}),
+        ...(managed?.probe?.hasComposer !== undefined
+          ? { hasComposer: managed.probe.hasComposer }
+          : {}),
+        ...(managed?.probe?.hasSend !== undefined
+          ? { hasSend: managed.probe.hasSend }
+          : {}),
+        ...(managed?.probe?.generating !== undefined
+          ? { probeGenerating: managed.probe.generating }
+          : {}),
+        ...(now - (presence?.lastSeen ?? 0) < CONNECTED_MS
+          ? { lastSeen: new Date(presence?.lastSeen ?? now).toISOString() }
+          : {}),
+      },
+    };
+  }
+
+  #debugCoordinatorProtocol(
+    agent: Agent | undefined,
+    capture: BrowserCaptureState | undefined,
+  ): DebugProviderCard['coordinatorProtocol'] {
+    if (agent === undefined || agent.role !== 'coordinator') {
+      return { state: 'not_applicable' };
+    }
+    const protocol = this.#coordinatorProtocolDebug;
+    if (protocol === undefined) {
+      return { state: 'not_started' };
+    }
+    // A newer Coordinator capture that has not been parsed yet reads as
+    // parsing — precise by delivery id, never inferred from timers.
+    const newerCapturePendingParse =
+      protocol.state === 'valid' &&
+      capture?.phase === 'captured' &&
+      capture.deliveryId !== undefined &&
+      capture.deliveryId !== protocol.deliveryId;
+    if (newerCapturePendingParse) {
+      return { state: 'parsing' };
+    }
+    return {
+      state: protocol.state,
+      ...(protocol.error !== undefined ? { error: protocol.error } : {}),
+      ...(protocol.stepIndex !== undefined ? { stepIndex: protocol.stepIndex } : {}),
+      ...(protocol.action !== undefined ? { action: protocol.action } : {}),
+    };
+  }
+
+  #debugPipeline(
+    agentId: string,
+    managedTransitions: readonly { readonly at: number; readonly label: string; readonly detail?: string }[],
+  ): readonly DebugPipelineStage[] {
+    type Entry = { at: number; label: string; detail?: string; source: 'managed' | 'runtime' };
+    const entries: Entry[] = [
+      ...managedTransitions.map((item) => ({ ...item, source: 'managed' as const })),
+      ...this.#debugTransitions
+        .filter((item) => item.agentId === agentId)
+        .map((item) => ({ at: item.at, label: item.label, detail: item.detail, source: 'runtime' as const })),
+    ];
+    const findLast = (labels: readonly string[]): Entry | undefined =>
+      entries
+        .filter((item) => labels.includes(item.label))
+        .sort((a, b) => a.at - b.at)
+        .at(-1);
+    const stage = (
+      name: string,
+      labels: readonly string[],
+      failLabels: readonly string[] = [],
+    ): DebugPipelineStage => {
+      const done = findLast(labels);
+      const failed = failLabels.length > 0 ? findLast(failLabels) : undefined;
+      if (failed && (!done || failed.at >= done.at)) {
+        return { stage: name, state: 'failed', at: new Date(failed.at).toISOString(), ...(failed.detail !== undefined ? { detail: failed.detail } : {}) };
+      }
+      if (done) {
+        return { stage: name, state: 'completed', at: new Date(done.at).toISOString(), ...(done.detail !== undefined ? { detail: done.detail } : {}) };
+      }
+      return { stage: name, state: 'not_started' };
+    };
+    const stages = [
+      stage('Provider session ready', ['session-connected']),
+      stage('Page ready', ['page-ready']),
+      stage('Delivery selected', ['delivery-selected']),
+      stage('Send started', ['send-started'], ['send-failed']),
+      stage('Submit accepted', ['submit-accepted', 'new-turn-detected'], ['send-failed']),
+      stage('New assistant turn', ['new-turn-detected']),
+      stage('Generation active', ['generation-active']),
+      stage('Generation ended', ['generation-ended']),
+      stage('Response captured', ['response-captured', 'capture-captured'], ['capture-failed']),
+      stage('Coordinator parsed', ['coordinator-parsed'], ['coordinator-invalid']),
+      stage('Next action', ['coordinator-reinvoked']),
+    ];
+    // The furthest completed stage before a failure is the active one.
+    let furthest = -1;
+    let furthestAt = 0;
+    stages.forEach((item, index) => {
+      if (item.state === 'completed' && item.at !== undefined) {
+        const at = Date.parse(item.at);
+        if (at >= furthestAt) {
+          furthestAt = at;
+          furthest = index;
+        }
+      }
+    });
+    const failedIndex = stages.findIndex((item) => item.state === 'failed');
+    if (furthest >= 0 && (failedIndex === -1 || furthest < failedIndex)) {
+      const current = stages[furthest];
+      if (current && current.state === 'completed') {
+        stages[furthest] = { ...current, state: 'active' };
+      }
+    }
+    return stages;
   }
 
   listAgents(): readonly Agent[] {
@@ -758,9 +1501,7 @@ export class RayzanRuntime {
     if (!this.#started) {
       return undefined;
     }
-    return this.#jobFromDelivery(
-      this.transport.listPendingForAgent(this.#requireAgent(agentId).id)[0],
-    );
+    return this.#jobFromDelivery(this.#resolveCorrelatedWork(agentId, 'pending'));
   }
 
   awaitingResponseForAgent(agentId: string): PendingBrowserJob | undefined {
@@ -768,10 +1509,250 @@ export class RayzanRuntime {
       return undefined;
     }
     return this.#jobFromDelivery(
-      this.transport.listAwaitingResponseForAgent(
-        this.#requireAgent(agentId).id,
-      )[0],
+      this.#resolveCorrelatedWork(agentId, 'delivered'),
     );
+  }
+
+  /**
+   * Correlate capture/send work to the active debate + current Coordinator
+   * action/delivery — never “newest Map entry” and never cross-debate fallback.
+   *
+   * 0 matches → no job (attention if stale leftovers exist)
+   * 1 match → that delivery
+   * >1 matches → attention / recovery; do not choose silently
+   */
+  #resolveCorrelatedWork(
+    agentId: string,
+    status: 'pending' | 'delivered',
+  ): OutboundDelivery | undefined {
+    const agent = this.#requireAgent(agentId);
+    const debate = this.#activeDebate();
+    if (debate === undefined) {
+      return undefined;
+    }
+
+    const pool =
+      status === 'pending'
+        ? this.transport.listPendingForAgent(agent.id)
+        : this.transport.listAwaitingResponseForAgent(agent.id);
+    const inDebate = pool.filter((item) => item.debateId === debate.id);
+
+    const correlatedIds = this.#correlatedDeliveryIdsForAgent(agent);
+    const eligible =
+      correlatedIds === undefined
+        ? []
+        : inDebate.filter((item) => correlatedIds.has(item.id));
+
+    if (eligible.length === 1) {
+      return eligible[0];
+    }
+
+    if (eligible.length > 1) {
+      this.#noteCaptureAttention(
+        agent.id,
+        `${eligible.length} correlated ${status} deliveries for ${agent.name}; Operator recovery required.`,
+      );
+      return undefined;
+    }
+
+    // Zero correlated matches. Stale in-debate leftovers are an invariant
+    // problem — quarantine them; do not fall back to any of them.
+    if (inDebate.length > 0 && correlatedIds !== undefined) {
+      for (const leftover of inDebate) {
+        if (!correlatedIds.has(leftover.id)) {
+          this.#quarantineDelivery(
+            leftover.id,
+            'SUPERSEDED',
+            `stale ${status} delivery outside current Coordinator step`,
+          );
+        }
+      }
+    } else if (inDebate.length > 1 && correlatedIds === undefined) {
+      this.#noteCaptureAttention(
+        agent.id,
+        `${inDebate.length} ${status} deliveries with no correlated Coordinator step; recovery required.`,
+      );
+    } else if (inDebate.length === 1 && correlatedIds === undefined) {
+      // Safe restore path: exactly one in-debate job and we lost the pointer
+      // (e.g. mid-replay). Adopt it rather than inventing “newest”.
+      const only = inDebate[0];
+      if (only !== undefined && agent.role === 'coordinator') {
+        this.#pendingCoordinatorDeliveryId = only.id;
+      }
+      return only;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Delivery ids that belong to the currently executing Coordinator action
+   * for this agent. `undefined` means no correlated step is known yet.
+   */
+  #correlatedDeliveryIdsForAgent(agent: Agent): ReadonlySet<string> | undefined {
+    if (agent.role === 'coordinator') {
+      if (this.#pendingCoordinatorDeliveryId !== undefined) {
+        return new Set([this.#pendingCoordinatorDeliveryId]);
+      }
+      return undefined;
+    }
+    if (this.#pendingStepDeliveryIds.size === 0) {
+      return undefined;
+    }
+    const ids = new Set<string>();
+    for (const deliveryId of this.#pendingStepDeliveryIds) {
+      const delivery = this.transport.getDelivery(asDeliveryId(deliveryId));
+      if (delivery?.recipientId === agent.id) {
+        ids.add(deliveryId);
+      }
+    }
+    return ids.size > 0 ? ids : undefined;
+  }
+
+  #noteCaptureAttention(agentId: string, message: string): void {
+    this.#record(`CAPTURE ATTENTION: ${message}`);
+    this.notePresence({
+      agentId,
+      phase: 'attention',
+      error: message,
+    });
+  }
+
+  #quarantineDelivery(
+    deliveryId: string,
+    reason: 'IN_DOUBT' | 'SUPERSEDED' | 'FAILED',
+    detail?: string,
+  ): void {
+    if (this.transport.isQuarantined(deliveryId)) {
+      return;
+    }
+    const delivery = this.transport.getDelivery(asDeliveryId(deliveryId));
+    if (delivery === undefined) {
+      return;
+    }
+    this.transport.quarantineDelivery(deliveryId, reason, detail);
+    this.#emit('DELIVERY_QUARANTINED', {
+      debateId: delivery.debateId,
+      ...(delivery.roundId !== undefined ? { roundId: delivery.roundId } : {}),
+      agentId: delivery.recipientId,
+      correlationId: `delivery:${deliveryId}`,
+      payload: {
+        deliveryId,
+        reason,
+        ...(detail ? { detail } : {}),
+        status: delivery.status,
+      },
+    });
+    this.#record(
+      `Delivery ${deliveryId} quarantined (${reason}${detail ? `: ${detail}` : ''}).`,
+    );
+    this.#debugTransition(
+      delivery.recipientId,
+      'delivery-quarantined',
+      `${reason}${detail ? `: ${detail}` : ''}`,
+    );
+  }
+
+  #adoptCoordinatorDelivery(deliveryId: string): void {
+    const debate = this.#activeDebate();
+    const coordinator = this.agents.listByRole('coordinator')[0];
+    if (debate !== undefined && coordinator !== undefined) {
+      const previous = this.#pendingCoordinatorDeliveryId;
+      if (previous !== undefined && previous !== deliveryId) {
+        this.#quarantineDelivery(
+          previous,
+          'SUPERSEDED',
+          'replaced by a newer Coordinator prompt delivery',
+        );
+      }
+      for (const pending of this.transport.listPendingForAgent(coordinator.id)) {
+        if (pending.debateId === debate.id && pending.id !== deliveryId) {
+          this.#quarantineDelivery(
+            pending.id,
+            'SUPERSEDED',
+            'stale Coordinator pending outside current prompt',
+          );
+        }
+      }
+      for (const awaiting of this.transport.listAwaitingResponseForAgent(
+        coordinator.id,
+      )) {
+        if (awaiting.debateId === debate.id && awaiting.id !== deliveryId) {
+          this.#quarantineDelivery(
+            awaiting.id,
+            'SUPERSEDED',
+            'stale Coordinator awaiting outside current prompt',
+          );
+        }
+      }
+    }
+    this.#pendingCoordinatorDeliveryId = deliveryId;
+  }
+
+  #setPendingStepDeliveries(deliveryIds: readonly string[]): void {
+    const next = new Set(deliveryIds);
+    for (const oldId of this.#pendingStepDeliveryIds) {
+      if (!next.has(oldId)) {
+        const delivery = this.transport.getDelivery(asDeliveryId(oldId));
+        if (delivery !== undefined && delivery.status !== 'responded') {
+          this.#quarantineDelivery(
+            oldId,
+            'SUPERSEDED',
+            'left behind when Coordinator advanced to a new action step',
+          );
+        }
+      }
+    }
+    this.#pendingStepDeliveryIds = next;
+  }
+
+  #dispatchTracked(intent: DispatchIntent): readonly OutboundDelivery[] {
+    const deliveries = this.orchestrator.dispatch(intent);
+    for (const delivery of deliveries) {
+      const recipient = this.agents.getById(delivery.recipientId);
+      if (recipient?.role === 'coordinator') {
+        this.#adoptCoordinatorDelivery(delivery.id);
+      }
+    }
+    return deliveries;
+  }
+
+  /**
+   * Explicit Operator recovery when a response is visible but automatic
+   * capture failed. Emits CAPTURE_SALVAGED_BY_OPERATOR provenance — never
+   * count this as happy-path capture success.
+   */
+  salvageVisibleResponse(
+    agentId: string,
+    deliveryId: string,
+    body: string,
+  ): void {
+    this.#requireStarted();
+    const agent = this.#requireAgent(agentId);
+    const delivery = this.transport.getDelivery(asDeliveryId(deliveryId));
+    if (delivery === undefined) {
+      throw new Error(`unknown delivery: ${deliveryId}`);
+    }
+    if (delivery.recipientId !== agent.id) {
+      throw new Error(
+        `agent ${agentId} cannot salvage delivery ${deliveryId}`,
+      );
+    }
+    this.#emit('CAPTURE_SALVAGED_BY_OPERATOR', {
+      debateId: delivery.debateId,
+      ...(delivery.roundId !== undefined ? { roundId: delivery.roundId } : {}),
+      agentId: agent.id,
+      correlationId: `delivery:${deliveryId}`,
+      payload: {
+        deliveryId,
+        bodyLength: body.trim().length,
+        provenance: 'operator-visible-response',
+      },
+    });
+    this.#record(
+      `CAPTURE_SALVAGED_BY_OPERATOR for ${agent.name} delivery ${deliveryId}.`,
+    );
+    this.submitCapturedResponse(agentId, deliveryId, body);
   }
 
   acknowledgeDelivery(agentId: string, deliveryId: string): OutboundDelivery {
@@ -799,6 +1780,7 @@ export class RayzanRuntime {
         ? this.orchestrator.confirmDelivery(deliveryId)
         : this.workflow.confirmDelivery(delivery.roundId, deliveryId);
     this.#record(`Delivery ${deliveryId} marked delivered.`);
+    this.#debugTransition(agent.id, 'delivery-confirmed', deliveryId);
     return confirmed;
   }
 
@@ -833,9 +1815,18 @@ export class RayzanRuntime {
           });
     this.#record(`Captured response for ${agent.name} (${agent.role}).`);
     this.notePresence({ agentId: agent.id, phase: 'captured' });
+    this.#debugTransition(agent.id, 'response-captured', deliveryId);
 
     if (agent.role === 'coordinator') {
-      this.#handleCoordinatorResponse(inbound.message.body);
+      if (this.#pendingCoordinatorDeliveryId === deliveryId) {
+        this.#pendingCoordinatorDeliveryId = undefined;
+      }
+      this.#coordinatorProtocolDebug = {
+        state: 'parsing',
+        at: Date.now(),
+        deliveryId,
+      };
+      this.#handleCoordinatorResponse(inbound.message.body, deliveryId);
       return;
     }
 
@@ -915,6 +1906,9 @@ export class RayzanRuntime {
         : {}),
       rounds,
       awaitingOperator: this.#awaitingOperator(),
+      ...(this.#pendingOperatorQuestionSnapshot()
+        ? { operatorQuestion: this.#pendingOperatorQuestionSnapshot() }
+        : {}),
       ...(checkpointRecord && checkpointRound
         ? {
             checkpoint: {
@@ -1017,79 +2011,139 @@ export class RayzanRuntime {
             recipientIds: [...message.recipientIds],
             kind: message.kind,
             body: message.body,
+            ...(message.roundId !== undefined
+              ? { roundId: message.roundId }
+              : {}),
           }))
         : [],
+      watcherContributions: this.#watcherContributions(),
+      ...(this.#activeConsultationRound()
+        ? {
+            coordinatorAction: {
+              stepIndex: this.#coordinatorStepIndex,
+              pendingDeliveryIds: [...this.#pendingStepDeliveryIds],
+              terminalDeliveryIds: this.#terminalStepDeliveryIds(),
+              decisionPending: this.#coordinatorDecisionPending,
+              latestAction: this.#latestCoordinatorActionSummary(),
+              roundStatus: this.#activeConsultationRound()?.status,
+              awaitingOperator: this.#awaitingOperator(),
+            },
+          }
+        : this.#awaitingOperator()
+          ? {
+              coordinatorAction: {
+                stepIndex: this.#coordinatorStepIndex,
+                pendingDeliveryIds: [],
+                terminalDeliveryIds: [],
+                decisionPending: false,
+                latestAction: this.#latestCoordinatorActionSummary(),
+                roundStatus: 'completed',
+                awaitingOperator: true,
+              },
+            }
+          : {}),
       replay: this.#replayResult,
     });
   }
 
-  #advanceAfterWatcherResponse(): void {
-    this.#maybeCompleteRound1();
-    this.#maybeCompleteRound2AndSynthesize();
+  #terminalStepDeliveryIds(): readonly string[] {
+    const ids: string[] = [];
+    for (const deliveryId of this.#pendingStepDeliveryIds) {
+      const delivery = this.transport.getDelivery(asDeliveryId(deliveryId));
+      if (delivery?.status === 'responded') {
+        ids.push(deliveryId);
+      }
+    }
+    // Also include responded deliveries from the latest action payload.
+    const latest = this.#latestCoordinatorActionSummary();
+    if (latest?.deliveryIds) {
+      for (const deliveryId of latest.deliveryIds) {
+        const delivery = this.transport.getDelivery(asDeliveryId(deliveryId));
+        if (delivery?.status === 'responded' && !ids.includes(deliveryId)) {
+          ids.push(deliveryId);
+        }
+      }
+    }
+    return Object.freeze(ids);
   }
 
-  #maybeCompleteRound1(): void {
-    const round1 = this.#roundByNumber(1);
-    if (round1 === undefined || round1.status === 'completed') {
+  #latestCoordinatorActionSummary():
+    | {
+        readonly stepIndex: number;
+        readonly action: string;
+        readonly deliveryIds?: readonly string[];
+      }
+    | undefined {
+    const debate = this.#focusDebate();
+    if (debate === undefined) {
+      return undefined;
+    }
+    const event = this.events
+      .listByDebate(debate.id)
+      .filter((item) => item.type === 'COORDINATOR_ACTION_CREATED')
+      .at(-1);
+    if (event === undefined) {
+      return undefined;
+    }
+    const payload = event.payload as {
+      readonly stepIndex?: number;
+      readonly action?: string;
+      readonly deliveryIds?: readonly string[];
+    };
+    return {
+      stepIndex:
+        typeof payload.stepIndex === 'number' ? payload.stepIndex : 0,
+      action: payload.action ?? 'unknown',
+      ...(Array.isArray(payload.deliveryIds)
+        ? { deliveryIds: payload.deliveryIds }
+        : {}),
+    };
+  }
+
+  #advanceAfterWatcherResponse(): void {
+    this.#maybeAdvanceCoordinatorActionStep();
+  }
+
+  /**
+   * After every Watcher delivery from the current Coordinator step is
+   * responded, re-invoke the Coordinator instead of ending the round.
+   */
+  #maybeAdvanceCoordinatorActionStep(): void {
+    if (this.#pendingStepDeliveryIds.size === 0) {
       return;
     }
-    try {
-      const progress = this.workflow.getRoundProgress(round1.id);
-      if (!progress.complete) {
+    for (const deliveryId of this.#pendingStepDeliveryIds) {
+      const delivery = this.transport.getDelivery(asDeliveryId(deliveryId));
+      if (delivery === undefined || delivery.status !== 'responded') {
         return;
       }
-      this.workflow.completeRound(round1.id);
-      this.#emit('ROUND_COMPLETED', {
-        debateId: round1.debateId,
-        roundId: round1.id,
-        causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
-        correlationId: `round:${round1.id}`,
-        payload: { number: 1, status: 'completed' },
-      });
-      this.#record('Round 1 auto-completed after all Watcher responses.');
-      this.#queueCoordinatorCheckpoint(round1);
-    } catch {
-      // Collection not ready.
     }
+    const completedIds = [...this.#pendingStepDeliveryIds];
+    this.#pendingStepDeliveryIds.clear();
+    this.#record(
+      `Coordinator action step complete (${completedIds.length} Watcher response(s)); re-invoking Coordinator.`,
+    );
+    this.#debugTransition(
+      undefined,
+      'coordinator-reinvoked',
+      `step ${this.#coordinatorStepIndex} complete (${completedIds.length} response(s))`,
+    );
+    this.#queueCoordinatorNextAction(completedIds);
   }
 
-  /** Legacy helper retained as a no-op: continuation is now operator-gated. */
+  /** Legacy helpers — Round completion is now checkpoint-driven. */
+  #maybeCompleteRound1(): void {
+    return;
+  }
+
   #ensureRound2Bootstrapped(): void {
     return;
   }
 
   #maybeCompleteRound2AndSynthesize(): void {
-    const round2 = this.#activeChallengeRound();
-    if (
-      round2 === undefined ||
-      round2.status === 'completed' ||
-      !this.#round2Dispatched
-    ) {
-      return;
-    }
-    try {
-      const progress = this.workflow.getRoundProgress(round2.id);
-      if (!progress.complete) {
-        return;
-      }
-      this.workflow.completeRound(round2.id);
-      this.#emit('ROUND_COMPLETED', {
-        debateId: round2.debateId,
-        roundId: round2.id,
-        causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
-        correlationId: `round:${round2.id}`,
-        payload: { number: 2, status: 'completed' },
-      });
-      this.#record(`Round ${round2.number} auto-completed after all Watcher responses.`);
-      this.#queueCoordinatorCheckpoint(round2);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.#lastError = message;
-      this.#record(`Round 2 completion failed: ${message}`);
-    }
+    return;
   }
 
-  /** Queue synthesis when Round 2 is done but the Coordinator was never prompted. */
   #ensureSynthesisQueued(): void {
     return;
   }
@@ -1114,6 +2168,10 @@ export class RayzanRuntime {
     });
     this.#round2Bootstrapped = true;
     this.#round2Dispatched = false;
+    this.#pendingStepDeliveryIds.clear();
+    this.#coordinatorStepIndex = 0;
+    this.#coordinatorDecisionPending = true;
+    this.#pendingOperatorQuestion = undefined;
     const coordinator = this.#requireSingleCoordinator();
     const intent = this.planner.plan(
       createDispatchPlan({
@@ -1122,7 +2180,7 @@ export class RayzanRuntime {
         senderId: OPERATOR_ID,
         recipients: { type: 'explicit-agents', agentIds: [coordinator.id] },
         kind: 'input',
-        body: coordinatorRoundPrompt({
+        body: coordinatorActionPrompt({
           problem: debate.topic,
           coordinatorId: coordinator.id,
           debateId: debate.id,
@@ -1130,14 +2188,16 @@ export class RayzanRuntime {
           roundNumber: number,
           watchers,
           evidencePacket: this.#boundedEvidence(),
+          evidenceCatalog: formatEvidenceCatalog(this.#evidenceCatalogForDebate()),
           latestCheckpoint: previous?.body,
           intervention: guidance,
+          stepContext: `Consultation Round ${number} started. Choose the next Rayzan action.`,
         }),
         referencedMessageIds: this.#recentResponseIds(),
       }),
     );
-    this.orchestrator.dispatch(intent);
-    this.#record(`Round ${number} created; Coordinator challenge plan queued.`);
+    this.#dispatchTracked(intent);
+    this.#record(`Round ${number} created; Coordinator action step queued.`);
   }
 
   #queueCoordinatorCheckpoint(round: Round): void {
@@ -1163,7 +2223,7 @@ export class RayzanRuntime {
         referencedMessageIds: this.#recentResponseIds(),
       }),
     );
-    this.orchestrator.dispatch(intent);
+    this.#dispatchTracked(intent);
     this.#checkpointQueued = true;
     this.#record(`Round ${round.number} complete; Coordinator checkpoint queued.`);
   }
@@ -1272,80 +2332,648 @@ export class RayzanRuntime {
         referencedMessageIds: responses.map((response) => response.messageId),
       }),
     );
-    this.orchestrator.dispatch(intent);
+    this.#dispatchTracked(intent);
     this.#record('Round 1 evidence packet queued for Coordinator.');
   }
 
-  #handleCoordinatorResponse(text: string): void {
+  #handleCoordinatorResponse(text: string, deliveryId?: string): void {
     this.#lastCommands = text;
+    if (this.#synthesisQueued) {
+      this.#storeCoordinatorSynthesis(text, deliveryId);
+      return;
+    }
     if (this.#checkpointQueued) {
+      // Legacy freeform checkpoint path (should be rare after 3C.6).
       this.#storeCoordinatorCheckpoint(text);
       return;
     }
-    if (!this.#round1Dispatched) {
-      this.#handleRound1CoordinatorBrief(text);
+    const round = this.#activeConsultationRound();
+    if (round !== undefined) {
+      this.#handleCoordinatorAction(text, round, deliveryId);
       return;
     }
-    if (!this.#round2Dispatched && this.#activeChallengeRound() !== undefined) {
-      this.#handleRound2CoordinatorPlan(text);
-      return;
-    }
-    this.#storeCoordinatorSynthesis(text);
+    this.#storeCoordinatorSynthesis(text, deliveryId);
   }
 
-  #handleRound1CoordinatorBrief(text: string): void {
-    try {
-      const batch = this.#bindRound1DispatchIds(
-        parseCoordinatorCommandBatch(unwrapCoordinatorJson(text)),
-      );
-      const dispatches = batch.commands.filter(
-        (command) => command.type === 'dispatch',
-      );
-      if (dispatches.length === 0) {
-        throw new Error('Coordinator Round 1 response had no dispatch command');
-      }
-      this.executor.execute(
-        createCoordinatorExecutionContext({
-          coordinatorId: this.#requireSingleCoordinator().id,
-          debateId: this.#debate().id,
-        }),
-        Object.freeze({
-          version: batch.version,
-          commands: Object.freeze(dispatches),
-        }),
-      );
-      this.#round1Dispatched = true;
-      this.#lastError = undefined;
-      this.#record(
-        'Coordinator Round 1 brief parsed; Watcher prompts queued with Coordinator as sender.',
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.#lastError = message;
-      this.#record(`Coordinator Round 1 command PARSE FAILED: ${message}`);
+  #activeConsultationRound(): Round | undefined {
+    const debate = this.#activeDebate();
+    if (debate === undefined) {
+      return undefined;
     }
+    return this.rounds
+      .listByDebate(debate.id)
+      .filter((round) => round.status !== 'completed')
+      .sort((a, b) => a.number - b.number)
+      .at(-1);
   }
 
-  #handleRound2CoordinatorPlan(text: string): void {
+  #handleCoordinatorAction(text: string, round: Round, deliveryId?: string): void {
     this.#coordinatorRaw = text;
     this.#coordinatorParseError = undefined;
-    this.#parsedChallenges = undefined;
+    this.#coordinatorDecisionPending = false;
     try {
-      const batch = parseCoordinatorCommandBatch(unwrapCoordinatorJson(text));
-      const watchers = this.#debateWatchers();
-      const challenges = watcherChallengesFromBatch({ batch, watchers });
-      this.#parsedChallenges = challenges;
+      if (this.#pendingOperatorQuestion !== undefined) {
+        throw new Error(
+          'Coordinator ask_operator is pending; wait for the Operator reply',
+        );
+      }
+      const parsed = parseCoordinatorCommandBatch(unwrapCoordinatorJson(text));
+      const batch = this.#bindActionCommandIds(parsed, round);
+      this.#coordinatorStepIndex += 1;
+      this.#coordinatorProtocolDebug = {
+        state: 'valid',
+        at: Date.now(),
+        ...(deliveryId !== undefined ? { deliveryId } : {}),
+        stepIndex: this.#coordinatorStepIndex,
+        action: batch.commands[0]?.type ?? 'unknown',
+      };
+      this.#debugTransition(
+        this.#requireSingleCoordinator().id,
+        'coordinator-parsed',
+        `step ${this.#coordinatorStepIndex}: ${batch.commands[0]?.type ?? 'unknown'}`,
+      );
+
+      const mode = batch.commands[0]?.type;
+      if (mode === 'checkpoint') {
+        const checkpoint = batch.commands[0];
+        if (checkpoint === undefined || checkpoint.type !== 'checkpoint') {
+          throw new Error('invalid checkpoint command');
+        }
+        this.#emit('COORDINATOR_ACTION_CREATED', {
+          debateId: round.debateId,
+          roundId: round.id,
+          agentId: this.#requireSingleCoordinator().id,
+          causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
+          correlationId: `round:${round.id}`,
+          payload: {
+            stepIndex: this.#coordinatorStepIndex,
+            action: 'checkpoint',
+            commands: ['checkpoint'],
+            recommendation: checkpoint.recommendation,
+          },
+        });
+        this.#applyCheckpointCommand(
+          round,
+          checkpoint.content,
+          checkpoint.recommendation,
+        );
+        this.#lastError = undefined;
+        this.#record(
+          `Coordinator checkpoint received for Round ${round.number} (${checkpoint.recommendation}).`,
+        );
+        return;
+      }
+
+      if (mode === 'ask_operator') {
+        const ask = batch.commands[0];
+        if (ask?.type !== 'ask_operator') {
+          throw new Error('invalid ask_operator command');
+        }
+        this.#emit('COORDINATOR_ACTION_CREATED', {
+          debateId: round.debateId,
+          roundId: round.id,
+          agentId: this.#requireSingleCoordinator().id,
+          causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
+          correlationId: `round:${round.id}`,
+          payload: {
+            stepIndex: this.#coordinatorStepIndex,
+            action: 'ask_operator',
+            commands: ['ask_operator'],
+            question: ask.question,
+          },
+        });
+        this.#applyAskOperatorCommand(round, ask.question);
+        this.#lastError = undefined;
+        this.#record(
+          `Coordinator asked Operator a clarifying question (Round ${round.number}).`,
+        );
+        return;
+      }
+
+      if (mode === 'forward') {
+        const deliveryIds = this.#forwardActionCommands(batch, round);
+        this.#setPendingStepDeliveries(deliveryIds);
+        this.#emit('COORDINATOR_ACTION_CREATED', {
+          debateId: round.debateId,
+          roundId: round.id,
+          agentId: this.#requireSingleCoordinator().id,
+          causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
+          correlationId: `round:${round.id}`,
+          payload: {
+            stepIndex: this.#coordinatorStepIndex,
+            action: 'forward',
+            commands: batch.commands.map((command) => command.type),
+            deliveryIds,
+          },
+        });
+        this.#markRoundDispatched(round);
+        this.#lastError = undefined;
+        this.#record(
+          `Coordinator action step ${this.#coordinatorStepIndex}: forwarded evidence to ${deliveryIds.length} recipient delivery(ies).`,
+        );
+        return;
+      }
+
+      if (mode !== 'dispatch') {
+        throw new Error(`unsupported Coordinator action mode: ${String(mode)}`);
+      }
+
+      const deliveryIds = this.#dispatchActionCommands(batch, round);
+      this.#setPendingStepDeliveries(deliveryIds);
+      this.#emit('COORDINATOR_ACTION_CREATED', {
+        debateId: round.debateId,
+        roundId: round.id,
+        agentId: this.#requireSingleCoordinator().id,
+        causationEventId: this.#lastEventId('RESPONSE_CAPTURED'),
+        correlationId: `round:${round.id}`,
+        payload: {
+          stepIndex: this.#coordinatorStepIndex,
+          action: 'dispatch',
+          commands: batch.commands.map((command) => command.type),
+          deliveryIds,
+        },
+      });
+      this.#markRoundDispatched(round);
       this.#lastError = undefined;
-      this.#record('Coordinator Round 2 plan parsed.');
-      this.#dispatchPersonalizedRound2(challenges);
+      this.#record(
+        `Coordinator action step ${this.#coordinatorStepIndex}: dispatched to ${deliveryIds.length} recipient delivery(ies).`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.#coordinatorParseError = message;
       this.#lastError = looksLikeTruncatedCoordinatorJson(text)
-        ? `Coordinator Round 2 plan was captured before the JSON finished streaming (${message}). Raw length=${text.trim().length}.`
+        ? `Coordinator action was captured before the JSON finished streaming (${message}).`
         : message;
-      this.#record(`Coordinator command PARSE FAILED: ${this.#lastError}`);
+      this.#record(`Coordinator action PARSE FAILED: ${this.#lastError}`);
+      this.#coordinatorProtocolDebug = {
+        state: 'invalid',
+        at: Date.now(),
+        ...(deliveryId !== undefined ? { deliveryId } : {}),
+        error: message,
+      };
+      this.#debugTransition(
+        this.agents.listByRole('coordinator')[0]?.id,
+        'coordinator-invalid',
+        message,
+      );
     }
+  }
+
+  #markRoundDispatched(round: Round): void {
+    if (round.number === 1) {
+      this.#round1Dispatched = true;
+    } else {
+      this.#round2Dispatched = true;
+    }
+  }
+
+  #pendingOperatorQuestionSnapshot():
+    | {
+        readonly debateId: string;
+        readonly roundId: string;
+        readonly roundNumber: number;
+        readonly question: string;
+        readonly createdAt: string;
+      }
+    | undefined {
+    const pending = this.#pendingOperatorQuestion;
+    if (pending === undefined) {
+      return undefined;
+    }
+    const round = this.rounds.getById(asRoundId(pending.roundId));
+    return {
+      debateId: pending.debateId,
+      roundId: pending.roundId,
+      roundNumber: round?.number ?? 0,
+      question: pending.question,
+      createdAt: pending.createdAt,
+    };
+  }
+
+  #bindActionCommandIds(
+    batch: CoordinatorCommandBatch,
+    round: Round,
+  ): CoordinatorCommandBatch {
+    const debateId = this.#debate().id;
+    return Object.freeze({
+      version: batch.version,
+      commands: Object.freeze(
+        batch.commands.map((command) => {
+          if (command.type === 'dispatch') {
+            const kind =
+              round.number === 1
+                ? command.kind === 'query'
+                  ? 'brief'
+                  : command.kind
+                : command.kind === 'brief'
+                  ? 'query'
+                  : command.kind;
+            return Object.freeze({
+              ...command,
+              messageId: asMessageId(this.#nextId('msg-coord-dispatch')),
+              debateId,
+              roundId: round.id,
+              kind,
+            });
+          }
+          if (command.type === 'forward') {
+            return Object.freeze({
+              ...command,
+              messageId: asMessageId(this.#nextId('msg-coord-forward')),
+              debateId,
+              roundId: round.id,
+            });
+          }
+          if (command.type === 'ask_operator' || command.type === 'checkpoint') {
+            return Object.freeze({
+              ...command,
+              debateId,
+              roundId: round.id,
+            });
+          }
+          return command;
+        }),
+      ),
+    });
+  }
+
+  #evidenceCatalogForDebate() {
+    const debate = this.#debate();
+    return buildEvidenceCatalog({
+      messages: this.messages.listByDebate(debate.id),
+      rounds: this.rounds.listByDebate(debate.id),
+      agents: this.agents.list(),
+    });
+  }
+
+  #forwardActionCommands(
+    batch: CoordinatorCommandBatch,
+    round: Round,
+  ): readonly string[] {
+    const watchers = this.#debateWatchers();
+    const byId = new Map(watchers.map((watcher) => [watcher.id, watcher]));
+    const catalog = this.#evidenceCatalogForDebate();
+    const debate = this.#debate();
+    const deliveryIds: string[] = [];
+    const forwards = batch.commands.filter(
+      (command) => command.type === 'forward',
+    );
+    if (forwards.length === 0 || forwards.length !== batch.commands.length) {
+      throw new Error('forward batches cannot mix non-forward commands');
+    }
+
+    for (const command of forwards) {
+      if (command.type !== 'forward') {
+        continue;
+      }
+      const sources = resolveEvidenceRefs({
+        catalog,
+        sourceRefs: command.sourceRefs,
+        sourceMessageIds: command.sourceMessageIds,
+      });
+      const recipientIds =
+        command.recipients.type === 'explicit-agents'
+          ? command.recipients.agentIds
+          : watchers.map((watcher) => watcher.id);
+      if (recipientIds.length === 0) {
+        throw new Error('forward recipients cannot be empty');
+      }
+      const sourceBlocks = sources.map((entry) => ({
+        authorName: entry.authorName,
+        body: entry.body,
+      }));
+      const referenced = sources.map((entry) => entry.messageId);
+
+      for (const agentId of recipientIds) {
+        const watcher = byId.get(agentId);
+        if (watcher === undefined) {
+          throw new Error(
+            `forward recipient is not an active Watcher: ${agentId}`,
+          );
+        }
+        const body = composeForwardWatcherBody(
+          round.number,
+          watcher.name,
+          sourceBlocks,
+          command.instruction,
+        );
+        const deliveries = this.workflow.dispatchPlan(
+          round.id,
+          createDispatchPlan({
+            messageId: this.#nextId('msg-watcher-forward'),
+            debateId: debate.id,
+            roundId: round.id,
+            senderId: this.#requireSingleCoordinator().id,
+            recipients: {
+              type: 'explicit-agents',
+              agentIds: [watcher.id],
+            },
+            kind: round.number === 1 ? 'brief' : 'query',
+            body,
+            referencedMessageIds: referenced,
+          }),
+        );
+        for (const delivery of deliveries) {
+          deliveryIds.push(delivery.id);
+        }
+      }
+    }
+    return Object.freeze(deliveryIds);
+  }
+
+  #applyAskOperatorCommand(round: Round, question: string): void {
+    const createdAt = new Date().toISOString();
+    this.#pendingStepDeliveryIds.clear();
+    this.#pendingOperatorQuestion = {
+      debateId: round.debateId,
+      roundId: round.id,
+      question,
+      createdAt,
+    };
+    this.#coordinatorDecisionPending = false;
+    this.#emit('COORDINATOR_OPERATOR_QUESTION_CREATED', {
+      debateId: round.debateId,
+      roundId: round.id,
+      agentId: this.#requireSingleCoordinator().id,
+      causationEventId: this.#lastEventId('COORDINATOR_ACTION_CREATED'),
+      correlationId: `round:${round.id}`,
+      payload: {
+        question,
+        createdAt,
+      },
+    });
+  }
+
+  /**
+   * Operator answers a pending ask_operator question; resumes the same round.
+   */
+  answerOperatorQuestion(answer: string): void {
+    this.#requireStarted();
+    const pending = this.#pendingOperatorQuestion;
+    if (pending === undefined) {
+      throw new Error('No pending Coordinator question for the Operator');
+    }
+    const trimmed = answer.trim();
+    if (trimmed.length === 0) {
+      throw new Error('Operator answer cannot be empty');
+    }
+    const round = this.rounds.getById(asRoundId(pending.roundId));
+    if (round === undefined || round.status === 'completed') {
+      throw new Error('ask_operator round is no longer active');
+    }
+    const coordinator = this.#requireSingleCoordinator();
+    const messageId = asMessageId(this.#nextId('msg-operator-answer'));
+    const message = createMessageEnvelope({
+      id: messageId,
+      debateId: pending.debateId,
+      roundId: pending.roundId,
+      senderId: OPERATOR_ID,
+      recipientIds: [coordinator.id],
+      kind: 'input',
+      body: `OPERATOR ANSWER\n${trimmed}`,
+    });
+    this.messages.store(message);
+    this.#emit('MESSAGE_CREATED', {
+      debateId: pending.debateId,
+      roundId: pending.roundId,
+      agentId: OPERATOR_ID,
+      correlationId: `round:${pending.roundId}`,
+      payload: {
+        messageId,
+        senderId: OPERATOR_ID,
+        recipientIds: [coordinator.id],
+        kind: 'input',
+        body: message.body,
+      },
+    });
+    this.#emit('OPERATOR_INTERVENTION', {
+      debateId: pending.debateId,
+      roundId: pending.roundId,
+      correlationId: `round:${pending.roundId}`,
+      payload: {
+        kind: 'ask_operator_answer',
+        question: pending.question,
+        answer: trimmed,
+        messageId,
+      },
+    });
+    this.#pendingOperatorQuestion = undefined;
+    this.#record('Operator answered Coordinator clarifying question.');
+    this.#coordinatorDecisionPending = true;
+    const intent = this.planner.plan(
+      createDispatchPlan({
+        messageId: this.#nextId('msg-coordinator-action'),
+        debateId: pending.debateId,
+        senderId: OPERATOR_ID,
+        recipients: { type: 'explicit-agents', agentIds: [coordinator.id] },
+        kind: 'input',
+        body: coordinatorActionPrompt({
+          problem: this.#debate().topic,
+          coordinatorId: coordinator.id,
+          debateId: pending.debateId,
+          roundId: pending.roundId,
+          roundNumber: round.number,
+          watchers: this.#debateWatchers(),
+          evidencePacket: this.#boundedEvidence(),
+          evidenceCatalog: formatEvidenceCatalog(this.#evidenceCatalogForDebate()),
+          latestCheckpoint: this.#latestCheckpoint()?.body,
+          newResults: `Operator answer to your question:\n${trimmed}`,
+          stepContext: `Round ${round.number}: Operator answered your question. Decide the next Rayzan action.`,
+        }),
+        referencedMessageIds: [messageId, ...this.#recentResponseIds()],
+      }),
+    );
+    this.#dispatchTracked(intent);
+  }
+
+  #dispatchActionCommands(
+    batch: CoordinatorCommandBatch,
+    round: Round,
+  ): readonly string[] {
+    const watchers = this.#debateWatchers();
+    const challenges = watcherChallengesFromBatch({ batch, watchers });
+    // Round 1 stays independent: do not prepend shared Watcher answers.
+    // Later rounds may include bounded common evidence for cross-examination.
+    const common =
+      round.number === 1
+        ? ''
+        : `COMMON DEBATE EVIDENCE\n======================\n${this.#boundedEvidence()}`;
+    const deliveryIds: string[] = [];
+    const debate = this.#debate();
+    const baselineIds = this.#recentResponseIds();
+
+    for (const challenge of challenges) {
+      const deliveries = this.workflow.dispatchPlan(
+        round.id,
+        createDispatchPlan({
+          messageId: this.#nextId('msg-watcher'),
+          debateId: debate.id,
+          roundId: round.id,
+          senderId: this.#requireSingleCoordinator().id,
+          recipients: {
+            type: 'explicit-agents',
+            agentIds: [challenge.agentId],
+          },
+          kind: round.number === 1 ? 'brief' : 'query',
+          body: composeRoundWatcherBody(
+            round.number,
+            challenge.name,
+            common,
+            challenge.challenge,
+          ),
+          referencedMessageIds: mergeReferencedMessageIds(
+            challenge.referencedMessageIds,
+            baselineIds,
+          ),
+        }),
+      );
+      for (const delivery of deliveries) {
+        deliveryIds.push(delivery.id);
+      }
+    }
+    return Object.freeze(deliveryIds);
+  }
+
+  #applyCheckpointCommand(
+    round: Round,
+    content: string,
+    recommendation: 'finish' | 'continue',
+  ): void {
+    this.#pendingStepDeliveryIds.clear();
+    if (round.status !== 'completed') {
+      this.workflow.completeRound(round.id);
+      this.#emit('ROUND_COMPLETED', {
+        debateId: round.debateId,
+        roundId: round.id,
+        causationEventId: this.#lastEventId('COORDINATOR_ACTION_CREATED'),
+        correlationId: `round:${round.id}`,
+        payload: { number: round.number, status: 'completed' },
+      });
+    }
+    if (this.checkpoints.getByRoundId(round.id) !== undefined) {
+      return;
+    }
+    const createdAt = new Date().toISOString();
+    const checkpoint = createCoordinatorCheckpoint({
+      debateId: round.debateId,
+      roundId: round.id,
+      body: content,
+      recommendation,
+      createdAt,
+    });
+    this.checkpoints.store(checkpoint);
+    this.#emit('COORDINATOR_CHECKPOINT_CREATED', {
+      debateId: checkpoint.debateId,
+      roundId: checkpoint.roundId,
+      agentId: this.#requireSingleCoordinator().id,
+      causationEventId: this.#lastEventId('ROUND_COMPLETED'),
+      correlationId: `round:${checkpoint.roundId}`,
+      payload: {
+        body: checkpoint.body,
+        recommendation: checkpoint.recommendation,
+        createdAt: checkpoint.createdAt,
+      },
+    });
+    this.#checkpointQueued = false;
+    this.#coordinatorDecisionPending = false;
+  }
+
+  #queueCoordinatorNextAction(completedDeliveryIds: readonly string[]): void {
+    const round = this.#activeConsultationRound();
+    if (round === undefined) {
+      return;
+    }
+    if (this.checkpoints.getByRoundId(round.id) !== undefined) {
+      return;
+    }
+    if (this.#pendingOperatorQuestion !== undefined) {
+      return;
+    }
+    const debate = this.#debate();
+    const coordinator = this.#requireSingleCoordinator();
+    const newResults = this.#formatStepResults(completedDeliveryIds);
+    this.#coordinatorDecisionPending = true;
+    const intent = this.planner.plan(
+      createDispatchPlan({
+        messageId: this.#nextId('msg-coordinator-action'),
+        debateId: debate.id,
+        senderId: OPERATOR_ID,
+        recipients: { type: 'explicit-agents', agentIds: [coordinator.id] },
+        kind: 'input',
+        body: coordinatorActionPrompt({
+          problem: debate.topic,
+          coordinatorId: coordinator.id,
+          debateId: debate.id,
+          roundId: round.id,
+          roundNumber: round.number,
+          watchers: this.#debateWatchers(),
+          evidencePacket: this.#boundedEvidence(),
+          evidenceCatalog: formatEvidenceCatalog(this.#evidenceCatalogForDebate()),
+          latestCheckpoint: this.#latestCheckpoint()?.body,
+          newResults,
+          stepContext: `Round ${round.number} action step ${this.#coordinatorStepIndex} finished. Decide the next Rayzan action.`,
+        }),
+        referencedMessageIds: this.#recentResponseIds(),
+      }),
+    );
+    this.#dispatchTracked(intent);
+    this.#record('Coordinator re-invoked after Watcher step results.');
+  }
+
+  #formatStepResults(deliveryIds: readonly string[]): string {
+    const debate = this.#focusDebate();
+    if (debate === undefined) {
+      return '(none)';
+    }
+    const lines: string[] = [];
+    for (const deliveryId of deliveryIds) {
+      const delivery = this.transport.getDelivery(asDeliveryId(deliveryId));
+      if (delivery === undefined) {
+        continue;
+      }
+      const agent = this.agents.getById(delivery.recipientId);
+      const responseBody = this.#responseBodyForDelivery(deliveryId);
+      lines.push(
+        `${agent?.name ?? delivery.recipientId}:\n${responseBody ?? '(missing response)'}`,
+      );
+    }
+    return lines.join('\n\n') || '(none)';
+  }
+
+  /** Resolve the captured response body for a specific delivery (not merely the first in-round reply). */
+  #responseBodyForDelivery(deliveryId: string): string | undefined {
+    const debate = this.#focusDebate();
+    if (debate === undefined) {
+      return undefined;
+    }
+    const captured = this.events
+      .listByDebate(debate.id)
+      .filter((event) => event.type === 'RESPONSE_CAPTURED')
+      .find((event) => {
+        const payload = event.payload as { readonly deliveryId?: string };
+        return payload.deliveryId === deliveryId;
+      });
+    if (captured === undefined) {
+      return undefined;
+    }
+    const payload = captured.payload as { readonly messageId?: string };
+    if (typeof payload.messageId !== 'string') {
+      return undefined;
+    }
+    return this.messages.getById(asMessageId(payload.messageId))?.body;
+  }
+
+  #handleRound1CoordinatorBrief(text: string): void {
+    const round = this.#requireRoundNumber(1);
+    this.#handleCoordinatorAction(text, round);
+  }
+
+  #handleRound2CoordinatorPlan(text: string): void {
+    const round = this.#activeChallengeRound() ?? this.#activeConsultationRound();
+    if (round === undefined) {
+      throw new Error('no active consultation round');
+    }
+    this.#handleCoordinatorAction(text, round);
   }
 
   /**
@@ -1524,7 +3152,7 @@ export class RayzanRuntime {
         referencedMessageIds: this.#recentResponseIds(),
       }),
     );
-    this.orchestrator.dispatch(intent);
+    this.#dispatchTracked(intent);
     this.#synthesisQueued = true;
     this.#record(
       causationEventId
@@ -1554,7 +3182,7 @@ export class RayzanRuntime {
     );
   }
 
-  #storeCoordinatorSynthesis(text: string): void {
+  #storeCoordinatorSynthesis(text: string, deliveryId?: string): void {
     const debate = this.#debate();
     if (this.syntheses.getByDebateId(debate.id)) {
       return;
@@ -1568,6 +3196,13 @@ export class RayzanRuntime {
         createdAt: new Date().toISOString(),
       });
       this.syntheses.store(synthesis);
+      this.#coordinatorProtocolDebug = {
+        state: 'valid',
+        at: Date.now(),
+        ...(deliveryId !== undefined ? { deliveryId } : {}),
+        action: 'synthesis',
+      };
+      this.#debugTransition(coordinator.id, 'coordinator-parsed', 'synthesis');
       this.#emit('SYNTHESIS_CREATED', {
         debateId: synthesis.debateId,
         agentId: synthesis.coordinatorId,
@@ -1666,6 +3301,63 @@ export class RayzanRuntime {
         );
       return message ? [{ name: watcher.name, body: message.body }] : [];
     });
+  }
+
+  /** Product-facing prompt/response pairs for Desktop transparency. */
+  #watcherContributions(): RayzanSnapshot['watcherContributions'] {
+    const debate = this.#focusDebate();
+    if (debate === undefined) {
+      return [];
+    }
+    const rounds = this.rounds.listByDebate(debate.id);
+    const messages = this.messages.listByDebate(debate.id);
+    const out: {
+      agentId: string;
+      name: string;
+      provider?: string;
+      roundNumber: number;
+      prompt: string;
+      response?: string;
+    }[] = [];
+
+    for (const round of rounds) {
+      for (const watcher of this.agents.listByRole('watcher')) {
+        if (!this.#watcherEnabled(watcher)) {
+          continue;
+        }
+        // One contribution per Coordinator→Watcher dispatch in the round.
+        // Agentic steps may contact the same Watcher multiple times.
+        const prompts = messages.filter(
+          (message) =>
+            message.roundId === round.id &&
+            (message.kind === 'brief' || message.kind === 'query') &&
+            message.recipientIds.includes(watcher.id),
+        );
+        if (prompts.length === 0) {
+          continue;
+        }
+        const responses = messages.filter(
+          (message) =>
+            message.roundId === round.id &&
+            message.kind === 'response' &&
+            message.senderId === watcher.id,
+        );
+        const provider = this.#providerFor(watcher.id);
+        for (let index = 0; index < prompts.length; index += 1) {
+          const prompt = prompts[index]!;
+          const response = responses[index];
+          out.push({
+            agentId: watcher.id,
+            name: watcher.name,
+            ...(provider !== undefined ? { provider } : {}),
+            roundNumber: round.number,
+            prompt: prompt.body,
+            ...(response ? { response: response.body } : {}),
+          });
+        }
+      }
+    }
+    return Object.freeze(out);
   }
 
   #coordinatorPlanSnapshot(): RayzanSnapshot['coordinatorPlan'] {
@@ -1965,12 +3657,26 @@ export class RayzanRuntime {
     if (roundId === undefined) {
       return undefined;
     }
-    return this.transport
+    // Prefer the delivery from the current Coordinator action step so a prior
+    // responded hop in the same round does not mask an in-flight job.
+    for (const deliveryId of this.#pendingStepDeliveryIds) {
+      const pending = this.transport.getDelivery(asDeliveryId(deliveryId));
+      if (
+        pending !== undefined &&
+        pending.recipientId === agentId &&
+        pending.roundId === roundId
+      ) {
+        return pending;
+      }
+    }
+    const matches = this.transport
       .listAll()
-      .find(
+      .filter(
         (delivery) =>
           delivery.recipientId === agentId && delivery.roundId === roundId,
       );
+    // Newest delivery in this round (Map insertion order is oldest-first).
+    return matches.at(-1);
   }
 
   #latestResponseFrom(agentId: AgentId): string | undefined {
@@ -2245,11 +3951,10 @@ export class RayzanRuntime {
       .slice(-3)
       .join('\n\n');
     return [
-      `Original problem:\n${debate.topic}`,
-      `Operator deliverable contract:\nPreserve the goal, requested output/artifact, and stated constraints from the original problem.`,
-      latest ? `Latest checkpoint:\n${latest.body}` : undefined,
-      interventions ? `Operator interventions:\n${interventions}` : undefined,
-      responses ? `Recent Watcher evidence:\n${responses}` : undefined,
+      `Original Operator problem:\n${debate.topic}`,
+      latest ? `Latest Coordinator checkpoint:\n${latest.body}` : undefined,
+      interventions ? `Operator guidance:\n${interventions}` : undefined,
+      responses ? `Recent Watcher answers:\n${responses}` : undefined,
     ]
       .filter((part): part is string => part !== undefined)
       .join('\n\n');
@@ -2438,10 +4143,16 @@ export class RayzanRuntime {
       this.#round2Dispatched = false;
       this.#synthesisQueued = false;
       this.#checkpointQueued = false;
+      this.#pendingStepDeliveryIds.clear();
+      this.#pendingCoordinatorDeliveryId = undefined;
+      this.#coordinatorStepIndex = 0;
+      this.#coordinatorDecisionPending = false;
+      this.#pendingOperatorQuestion = undefined;
       this.#lastCommands = undefined;
       this.#lastError = undefined;
       this.#coordinatorRaw = undefined;
       this.#coordinatorParseError = undefined;
+      this.#coordinatorProtocolDebug = undefined;
       this.#parsedChallenges = undefined;
       return;
     }
@@ -2476,6 +4187,129 @@ export class RayzanRuntime {
       );
     this.#synthesisQueued = this.#synthesisAlreadyQueuedOrStored();
     this.#checkpointQueued = false;
+    this.#restoreCoordinatorActionLoop(debate.id);
+  }
+
+  /**
+   * Rebuild Coordinator action-step flags from the event log after replay.
+   * Does not re-dispatch browser work.
+   */
+  #restoreCoordinatorActionLoop(debateId: string): void {
+    this.#pendingStepDeliveryIds.clear();
+    this.#pendingCoordinatorDeliveryId = undefined;
+    this.#coordinatorStepIndex = 0;
+    this.#coordinatorDecisionPending = false;
+    this.#pendingOperatorQuestion = undefined;
+    const active = this.#activeConsultationRound();
+    if (active === undefined || this.checkpoints.getByRoundId(active.id)) {
+      return;
+    }
+    const events = this.events.listByDebate(asDebateId(debateId));
+
+    // Restore pending ask_operator if unanswered.
+    const questions = events.filter(
+      (event) =>
+        event.type === 'COORDINATOR_OPERATOR_QUESTION_CREATED' &&
+        event.roundId === active.id,
+    );
+    const latestQuestion = questions.at(-1);
+    if (latestQuestion !== undefined) {
+      const qPayload = latestQuestion.payload as {
+        readonly question?: string;
+        readonly createdAt?: string;
+      };
+      const answeredAfter = events
+        .slice(events.indexOf(latestQuestion) + 1)
+        .some((event) => {
+          if (event.type !== 'OPERATOR_INTERVENTION') {
+            return false;
+          }
+          const payload = event.payload as { readonly kind?: string };
+          return payload.kind === 'ask_operator_answer';
+        });
+      if (!answeredAfter && typeof qPayload.question === 'string') {
+        this.#pendingOperatorQuestion = {
+          debateId: active.debateId,
+          roundId: active.id,
+          question: qPayload.question,
+          createdAt:
+            typeof qPayload.createdAt === 'string'
+              ? qPayload.createdAt
+              : latestQuestion.timestamp.toISOString(),
+        };
+        this.#coordinatorDecisionPending = false;
+        const actionForQuestion = events
+          .filter(
+            (event) =>
+              event.type === 'COORDINATOR_ACTION_CREATED' &&
+              event.roundId === active.id,
+          )
+          .at(-1);
+        const actionPayload = actionForQuestion?.payload as
+          | { readonly stepIndex?: number }
+          | undefined;
+        this.#coordinatorStepIndex =
+          typeof actionPayload?.stepIndex === 'number'
+            ? actionPayload.stepIndex
+            : questions.length;
+        return;
+      }
+    }
+
+    const actions = events.filter(
+      (event) =>
+        event.type === 'COORDINATOR_ACTION_CREATED' &&
+        event.roundId === active.id,
+    );
+    const latest = actions.at(-1);
+    if (latest === undefined) {
+      this.#coordinatorDecisionPending = true;
+      this.#restorePendingCoordinatorDeliveryPointer();
+      return;
+    }
+    const payload = latest.payload as {
+      readonly stepIndex?: number;
+      readonly action?: string;
+      readonly deliveryIds?: readonly string[];
+    };
+    this.#coordinatorStepIndex =
+      typeof payload.stepIndex === 'number' ? payload.stepIndex : actions.length;
+    if (payload.action === 'checkpoint' || payload.action === 'ask_operator') {
+      return;
+    }
+    const deliveryIds = Array.isArray(payload.deliveryIds)
+      ? payload.deliveryIds
+      : [];
+    const unresolved = deliveryIds.filter((id) => {
+      const delivery = this.transport.getDelivery(asDeliveryId(id));
+      return delivery === undefined || delivery.status !== 'responded';
+    });
+    if (unresolved.length > 0) {
+      this.#setPendingStepDeliveries(unresolved);
+      this.#coordinatorDecisionPending = false;
+      return;
+    }
+    this.#coordinatorDecisionPending = true;
+    this.#restorePendingCoordinatorDeliveryPointer();
+  }
+
+  /** After replay, re-bind the exact Coordinator delivery when exactly one remains. */
+  #restorePendingCoordinatorDeliveryPointer(): void {
+    if (this.#pendingCoordinatorDeliveryId !== undefined) {
+      return;
+    }
+    const debate = this.#activeDebate();
+    const coordinator = this.agents.listByRole('coordinator')[0];
+    if (debate === undefined || coordinator === undefined) {
+      return;
+    }
+    const candidates = [
+      ...this.transport.listPendingForAgent(coordinator.id),
+      ...this.transport.listAwaitingResponseForAgent(coordinator.id),
+    ].filter((item) => item.debateId === debate.id);
+    if (candidates.length === 1 && candidates[0] !== undefined) {
+      this.#pendingCoordinatorDeliveryId = candidates[0].id;
+    }
   }
 
   #resetDebateSessionState(): void {
@@ -2485,10 +4319,16 @@ export class RayzanRuntime {
     this.#round2Dispatched = false;
     this.#synthesisQueued = false;
     this.#checkpointQueued = false;
+    this.#pendingStepDeliveryIds.clear();
+    this.#pendingCoordinatorDeliveryId = undefined;
+    this.#coordinatorStepIndex = 0;
+    this.#coordinatorDecisionPending = false;
+    this.#pendingOperatorQuestion = undefined;
     this.#lastError = undefined;
     this.#lastCommands = undefined;
     this.#coordinatorRaw = undefined;
     this.#coordinatorParseError = undefined;
+    this.#coordinatorProtocolDebug = undefined;
     this.#parsedChallenges = undefined;
   }
 
@@ -2562,6 +4402,9 @@ export class RayzanRuntime {
       },
       hydrateDelivery: (delivery) => {
         this.transport.hydrateDelivery(delivery);
+      },
+      quarantineDelivery: (deliveryId, reason, detail) => {
+        this.transport.quarantineDelivery(deliveryId, reason, detail);
       },
       getDelivery: (id) => this.transport.getDelivery(asDeliveryId(id)),
       setDeliveryStatus: (id, status) => {
@@ -2719,28 +4562,14 @@ export class RayzanRuntime {
   }
 }
 
-function looksLikeTruncatedCoordinatorJson(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) {
-    return true;
-  }
-  if (!(trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('```'))) {
-    return false;
-  }
-  try {
-    JSON.parse(unwrapCoordinatorJson(trimmed));
-    return false;
-  } catch {
-    return true;
-  }
-}
-
 function asPhase(value: string | undefined): AgentPhase {
   switch (value) {
     case 'waiting':
     case 'sending':
     case 'generating':
+    case 'capturing':
     case 'captured':
+    case 'attention':
     case 'error':
     case 'idle':
       return value;
@@ -2749,8 +4578,167 @@ function asPhase(value: string | undefined): AgentPhase {
   }
 }
 
-function asCaptureState(value: unknown): BrowserCaptureState | undefined {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+const DEBUG_SESSION_STATES = [
+  'connected',
+  'restoring',
+  'connecting',
+  'logged_out',
+  'error',
+  'not_connected',
+  'unknown',
+] as const;
+const DEBUG_PAGE_STATES = [
+  'ready',
+  'loading',
+  'navigating',
+  'hidden',
+  'error',
+  'none',
+  'unknown',
+] as const;
+const DEBUG_SEND_STATES = [
+  'unknown',
+  'idle',
+  'preparing',
+  'composer_ready',
+  'submitting',
+  'accepted',
+  'failed',
+] as const;
+const DEBUG_GENERATION_STATES = ['idle', 'active', 'ended', 'unknown'] as const;
+
+function normalizeManagedDebugState(
+  record: Record<string, unknown>,
+): ManagedProviderDebugState {
+  const pick = (
+    allowed: readonly string[],
+    value: unknown,
+  ): string | undefined =>
+    typeof value === 'string' && (allowed as readonly string[]).includes(value)
+      ? value
+      : undefined;
+  const session =
+    record.session !== null && typeof record.session === 'object'
+      ? (record.session as Record<string, unknown>)
+      : undefined;
+  const page =
+    record.page !== null && typeof record.page === 'object'
+      ? (record.page as Record<string, unknown>)
+      : undefined;
+  const conversation =
+    record.conversation !== null && typeof record.conversation === 'object'
+      ? (record.conversation as Record<string, unknown>)
+      : undefined;
+  const send =
+    record.send !== null && typeof record.send === 'object'
+      ? (record.send as Record<string, unknown>)
+      : undefined;
+  const generation =
+    record.generation !== null && typeof record.generation === 'object'
+      ? (record.generation as Record<string, unknown>)
+      : undefined;
+  const probe =
+    record.probe !== null && typeof record.probe === 'object'
+      ? (record.probe as Record<string, unknown>)
+      : undefined;
+  const transitions = Array.isArray(record.transitions)
+    ? record.transitions
+        .filter(
+          (item): item is Record<string, unknown> =>
+            item !== null &&
+            typeof item === 'object' &&
+            typeof (item as Record<string, unknown>).at === 'number' &&
+            typeof (item as Record<string, unknown>).label === 'string',
+        )
+        .slice(-40)
+        .map((item) => ({
+          at: item.at as number,
+          label: item.label as string,
+          ...(typeof item.detail === 'string' ? { detail: item.detail } : {}),
+        }))
+    : undefined;
+  const sessionState = pick(DEBUG_SESSION_STATES, session?.state);
+  const pageState = pick(DEBUG_PAGE_STATES, page?.state);
+  const sendState = pick(DEBUG_SEND_STATES, send?.state);
+  const generationState = pick(DEBUG_GENERATION_STATES, generation?.state);
+  return {
+    providerId: String(record.providerId),
+    ...(sessionState !== undefined
+      ? {
+          session: {
+            state: sessionState as DebugSessionState,
+            ...(typeof session?.detail === 'string'
+              ? { detail: session.detail }
+              : {}),
+            ...(typeof session?.loggedIn === 'boolean'
+              ? { loggedIn: session.loggedIn }
+              : {}),
+          },
+        }
+      : {}),
+    ...(pageState !== undefined
+      ? {
+          page: {
+            state: pageState as DebugPageState,
+            ...(typeof page?.url === 'string' ? { url: page.url } : {}),
+            ...(typeof page?.visible === 'boolean'
+              ? { visible: page.visible }
+              : {}),
+          },
+        }
+      : {}),
+    ...(conversation !== undefined &&
+    (conversation.state === 'ready' ||
+      conversation.state === 'none' ||
+      conversation.state === 'unknown')
+      ? {
+          conversation: {
+            state: conversation.state,
+            ...(typeof conversation.conversationId === 'string'
+              ? { conversationId: conversation.conversationId }
+              : {}),
+          },
+        }
+      : {}),
+    ...(sendState !== undefined
+      ? {
+          send: {
+            state: sendState as DebugSendState,
+            ...(typeof send?.error === 'string' ? { error: send.error } : {}),
+          },
+        }
+      : {}),
+    ...(generationState !== undefined
+      ? { generation: { state: generationState as DebugGenerationState } }
+      : {}),
+    ...(probe !== undefined
+      ? {
+          probe: {
+            ...(typeof probe.hasComposer === 'boolean'
+              ? { hasComposer: probe.hasComposer }
+              : {}),
+            ...(typeof probe.hasSend === 'boolean'
+              ? { hasSend: probe.hasSend }
+              : {}),
+            ...(typeof probe.generating === 'boolean'
+              ? { generating: probe.generating }
+              : {}),
+            ...(typeof probe.url === 'string' ? { url: probe.url } : {}),
+            ...(typeof probe.title === 'string' ? { title: probe.title } : {}),
+          },
+        }
+      : {}),
+    ...(typeof record.lastError === 'string'
+      ? { lastError: record.lastError }
+      : {}),
+    ...(typeof record.lastChangedAt === 'number'
+      ? { lastChangedAt: record.lastChangedAt }
+      : {}),
+    ...(transitions !== undefined ? { transitions } : {}),
+  };
+}
+
+function asCaptureState(value: unknown): BrowserCaptureState | undefined {  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
   const record = value as Record<string, unknown>;
@@ -2782,6 +4770,18 @@ function asCaptureState(value: unknown): BrowserCaptureState | undefined {
       ? { textLength: record.textLength }
       : {}),
     ...(typeof record.posted === 'boolean' ? { posted: record.posted } : {}),
+    ...(typeof record.generationEndedAt === 'number'
+      ? { generationEndedAt: record.generationEndedAt }
+      : {}),
+    ...(typeof record.capturedAt === 'number'
+      ? { capturedAt: record.capturedAt }
+      : {}),
+    ...(typeof record.domChangedAfterTerminal === 'boolean'
+      ? { domChangedAfterTerminal: record.domChangedAfterTerminal }
+      : {}),
+    ...(typeof record.domChangedAfterCapture === 'boolean'
+      ? { domChangedAfterCapture: record.domChangedAfterCapture }
+      : {}),
   };
 }
 

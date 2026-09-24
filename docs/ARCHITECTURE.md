@@ -85,7 +85,7 @@ CoordinatorCommandExecutor
 DispatchPlan / RoundWorkflow / Orchestrator / DebateStore
 ```
 
-A Coordinator response is raw text. A `CoordinatorCommand` is a validated mechanical instruction. Rayzan does not infer actions from prose. v1 requires the entire response to be JSON; wrapped or mixed prose is rejected. Coordinator output is untrusted: it never goes through `eval`, dynamic method dispatch, or arbitrary tool execution. The command vocabulary is a closed union (`dispatch`, `complete-round`, `finalize-debate`) and is the same for every Coordinator provider.
+A Coordinator response is raw text. A `CoordinatorCommand` is a validated mechanical instruction. Rayzan does not infer actions from prose. v1 requires the entire response to be JSON; wrapped or mixed prose is rejected. Coordinator output is untrusted: it never goes through `eval`, dynamic method dispatch, or arbitrary tool execution. The command vocabulary is a closed union (`dispatch`, `forward`, `ask_operator`, `checkpoint`, `complete-round`, `finalize-debate`) and is the same for every Coordinator provider. Phase 3C.6 makes the first four the primary live consultation actions: a step is exactly one mode; same-step commands run in parallel; after terminal results Rayzan re-invokes the Coordinator. `forward` resolves durable evidence refs (E1…) to verbatim Watcher responses. `ask_operator` pauses the current round for Operator input. `checkpoint` ends the consultation and returns Operator control. Rayzan binds debate/round/message/delivery ids mechanically.
 
 `dispatch` omits `senderId`. The executor binds the sender from trusted execution context (`InboundResponse.senderId` / Coordinator Agent ID, plus the inbound `debateId`). Command JSON cannot impersonate another Agent.
 
@@ -188,36 +188,38 @@ Phase 3A demo bootstraps one active Debate/Round 1 from registered Watchers beca
 
 | Role         | Kind           | Responsibility                                                                                                                                                                               |
 | ------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Operator     | Human          | Final authority. Introduces the problem, may override any recommendation, and approves implementation.                                                                                       |
-| Coordinator  | External agent | Connected chatbot that owns complete debate context, semantic reasoning, debate rounds, synthesis, and convergence decisions. Does not implement. Rayzan does not contain this intelligence. |
-| Watchers     | Agents         | Independent reasoning agents. Analyze, challenge, and recommend. Do not implement.                                                                                                           |
+| Operator     | Human          | Final authority. States the problem, may add guidance, and decides whether to continue or finish.                                                                                            |
+| Coordinator  | External agent | Intellectual orchestrator. Interprets the Operator goal, chooses Watcher questions/format/depth, challenges when useful, and produces the Operator-facing answer/artifact.                    |
+| Watchers     | Agents         | Answer the Coordinator's request as asked. Response shape is chosen by the Coordinator, not by a Rayzan template.                                                                            |
 | Coder        | Agent          | Codebase authority and the only implementation agent.                                                                                                                                        |
-| Orchestrator | Software       | Mechanical protocol concerns: identity, routing, round state, delivery, attribution, exposure, and history.                                                                                  |
+| Orchestrator | Software       | Mechanical protocol: identity, routing, rounds as consultation boundaries, delivery, attribution, exposure, history, UI, recovery. Does not decide debate methodology.                        |
 
 ## Responsibility boundary
 
+**Rayzan orchestrates mechanically. The Coordinator orchestrates intellectually.**
+
 **Coordinator is an external agent.** Semantic judgment lives in the connected Coordinator chatbot, not in Rayzan. Examples:
 
-- what question is being debated
-- what information a Watcher should receive
-- how Watcher positions should be interpreted
-- whether another debate round is needed
-- when the debate has converged
-- final synthesis and recommendation
+- what the Operator actually wants and what deliverable is requested
+- what each Watcher should be asked, in what format, and at what depth
+- whether independent perspectives, challenges, or new directions are useful
+- how Watcher answers should be integrated
+- how the Operator-facing answer should be presented
+- whether another consultation is recommended
 
-Rayzan must not contain a Coordinator engine that analyzes opinions, decides consensus, or chooses the next question.
+Rayzan must not inject a generic intellectual Watcher template (assumptions, pros/cons, recommendation sections, etc.) into every prompt. The Coordinator may request those structures when useful. Rayzan must not contain a semantic task classifier that recreates the same problem.
 
 **Orchestrator owns mechanical protocol invariants.** Examples:
 
 - agent identity
 - message routing
-- round state
-- recipient enforcement
-- attribution
-- delivery state
-- exposure ledger
-- audit/history
-- Round 1 isolation
+- rounds as lifecycle / transport / provenance units
+- recipient enforcement and Round 1 isolation
+- attribution, delivery state, exposure ledger
+- audit/history, replay, Desktop progress and transparency
+- Operator Continue / Finish / guidance controls
+
+Rounds are mechanical consultation boundaries, not predetermined reasoning methodologies.
 
 ## Transports
 

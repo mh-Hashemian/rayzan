@@ -74,9 +74,9 @@ function presencePhase(phase: CapturePhase | 'sending' | 'waiting'): string {
   if (
     phase === 'waiting-for-new-turn' ||
     phase === 'generating' ||
-    phase === 'stabilizing'
+    phase === 'reading-final-response'
   ) {
-    return 'generating';
+    return phase === 'reading-final-response' ? 'capturing' : 'generating';
   }
   return 'waiting';
 }

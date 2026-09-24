@@ -93,15 +93,15 @@ export function DecisionReview(input: {
         <ol className="review-process">
           <li>
             <strong>Round 1</strong>
-            <span>Independent analysis</span>
+            <span>Independent consultation</span>
           </li>
           <li>
-            <strong>Round 2</strong>
-            <span>Critique and refinement</span>
+            <strong>Later rounds</strong>
+            <span>Coordinator-directed follow-up</span>
           </li>
           <li>
             <strong>Final</strong>
-            <span>Coordinator synthesis</span>
+            <span>Coordinator answer</span>
           </li>
         </ol>
       </div>

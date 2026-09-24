@@ -1,4 +1,5 @@
-import type { AssistantTurn, CaptureSnapshot } from '../capture/types.js';
+import type { CaptureSnapshot } from '@rayzan/capture';
+import type { AssistantTurn } from '../capture/assistant-turn.js';
 
 export interface ConversationSnapshot {
   readonly assistantTurnCount: number;
