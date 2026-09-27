@@ -38,9 +38,6 @@ pnpm --filter @rayzan/desktop rebuild-native
 pnpm desktop:dist
 ```
 
-Artifacts:
+Each run writes to a new timestamped directory under `apps/rayzan-desktop/release/` and prints that path. It contains the Windows installer (`Rayzan-0.0.0-win-x64.exe`), a portable ZIP, and `win-unpacked/Rayzan.exe`. A running copy from an older directory can stay open during the next build.
 
-- `apps/rayzan-desktop/release/win-unpacked/Rayzan.exe` — double-click, no Node/pnpm required
-- `apps/rayzan-desktop/release/Rayzan-0.0.0-win-x64.zip`
-
-NSIS installer is not produced yet: electron-builder's NSIS templates live under a pnpm path containing `@`, which `makensis` cannot `!include`. The unpacked app and zip are the 3C.1 deliverable.
+See [BUILD-WINDOWS.md](../../docs/BUILD-WINDOWS.md) for the full build and tester handoff steps.

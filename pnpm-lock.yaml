@@ -51,9 +51,6 @@ importers:
 
   apps/rayzan-desktop:
     dependencies:
-      '@rayzan/capture':
-        specifier: workspace:*
-        version: link:../../packages/capture
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1
@@ -64,6 +61,9 @@ importers:
       '@electron/rebuild':
         specifier: ^3.7.2
         version: 3.7.2
+      '@rayzan/capture':
+        specifier: workspace:*
+        version: link:../../packages/capture
       '@rayzan/local':
         specifier: workspace:*
         version: link:../rayzan-local

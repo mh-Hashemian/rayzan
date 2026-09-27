@@ -9,18 +9,18 @@
   "scripts": {
     "dev": "node scripts/ensure-electron-sqlite.mjs && vite",
     "build": "node scripts/ensure-electron-sqlite.mjs && vite build",
-    "dist": "node scripts/ensure-electron-sqlite.mjs && vite build && electron-builder --win --x64",
+    "dist": "node scripts/ensure-electron-sqlite.mjs && vite build && node scripts/package-desktop.mjs",
     "rebuild-native": "node scripts/ensure-electron-sqlite.mjs --force",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "tsx --test tests/managed-provider.test.ts tests/derive.test.ts tests/markdown.test.tsx"
   },
   "dependencies": {
     "better-sqlite3": "12.11.1",
-    "@rayzan/capture": "workspace:*",
     "esbuild": "^0.25.10"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",
+    "@rayzan/capture": "workspace:*",
     "@rayzan/local": "workspace:*",
     "@types/node": "^20.19.43",
     "@types/react": "^18.3.18",
@@ -51,17 +51,23 @@
       {
         "from": ".electron-native/node_modules/better-sqlite3",
         "to": "node_modules/better-sqlite3",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "node_modules/esbuild",
         "to": "node_modules/esbuild",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "node_modules/@esbuild",
         "to": "node_modules/@esbuild",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asar": true,
@@ -77,6 +83,15 @@
         "to": "local-public"
       },
       {
+        "from": "../../packages/capture",
+        "to": "capture",
+        "filter": [
+          "package.json",
+          "src/**",
+          "!src/**/*.test.ts"
+        ]
+      },
+      {
         "from": "resources/rayzan-app-icon.ico",
         "to": "rayzan-app-icon.ico"
       }
@@ -85,21 +100,31 @@
     "afterPack": "./scripts/after-pack.cjs",
     "electronVersion": "32.2.8",
     "forceCodeSigning": false,
+    "nsis": {
+      "installerIcon": "resources/rayzan-app-icon.ico",
+      "uninstallerIcon": "resources/rayzan-app-icon.ico"
+    },
     "win": {
       "icon": "resources/rayzan-app-icon.ico",
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "dir",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

@@ -1,10 +1,20 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+
+import { app } from 'electron';
 
 import { buildSync } from 'esbuild';
 
 let cached: string | undefined;
+
+function capturePackageRoot(): string {
+  const require = createRequire(import.meta.url);
+  // esbuild's native binary cannot read inside app.asar, so the packaged app
+  // ships the shared capture sources as real files under resources/capture.
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'capture')
+    : path.dirname(require.resolve('@rayzan/capture/package.json'));
+}
 
 /**
  * Bundle shared ChatGPT send helpers into a page-world IIFE for Electron
@@ -14,24 +24,16 @@ export function chatgptSendIifeSource(): string {
   if (cached) {
     return cached;
   }
-  const require = createRequire(import.meta.url);
-  let entry: string;
-  try {
-    entry = require.resolve('@rayzan/capture/send/page-entry');
-  } catch {
-    // Workspace TypeScript export — resolve via package root.
-    const pkg = path.dirname(require.resolve('@rayzan/capture/package.json'));
-    entry = path.join(pkg, 'src/send/page-entry.ts');
-  }
+  const packageRoot = capturePackageRoot();
   const result = buildSync({
-    entryPoints: [entry],
+    entryPoints: [path.join(packageRoot, 'src', 'send', 'page-entry.ts')],
     bundle: true,
     write: false,
     format: 'iife',
     globalName: '__rayzanChatGptSend',
     platform: 'browser',
     target: ['chrome120'],
-    absWorkingDir: path.dirname(fileURLToPath(import.meta.url)),
+    absWorkingDir: packageRoot,
   });
   const text = result.outputFiles[0]?.text;
   if (!text) {
