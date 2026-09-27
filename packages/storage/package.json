@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/in-memory-event-store.test.ts src/sqlite-event-store.test.ts"
+    "test": "tsx --test src/in-memory-event-store.test.ts src/sqlite-event-store.test.ts src/sqlite-settings-store.test.ts"
   },
   "dependencies": {
     "@rayzan/events": "workspace:*",

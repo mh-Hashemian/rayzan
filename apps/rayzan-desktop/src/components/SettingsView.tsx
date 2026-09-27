@@ -1,6 +1,7 @@
 import type { DesktopInfo } from '../desktop.js';
 import type { RayzanDesktopStatus } from '../api.js';
 import { AiProvidersPanel } from './settings/AiProvidersPanel.js';
+import { CoordinatorProfilePanel } from './settings/CoordinatorProfilePanel.js';
 
 function recoveryLabel(status: RayzanDesktopStatus | undefined): string {
   if (status === undefined) {
@@ -44,6 +45,8 @@ export function SettingsView(input: {
       ) : null}
 
       <AiProvidersPanel />
+
+      <CoordinatorProfilePanel />
 
       <h2 className="settings-runtime-heading">Runtime</h2>
       <ul className="status-list">

@@ -4,7 +4,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { EventStore } from '@rayzan/events';
-import { InMemoryEventStore, SqliteEventStore } from '@rayzan/storage';
+import {
+  InMemoryEventStore,
+  InMemorySettingsStore,
+  SqliteEventStore,
+  SqliteSettingsStore,
+  type SettingsStore,
+} from '@rayzan/storage';
 
 import { handleBridgeRequest, type BridgeContext } from './bridge.js';
 import { LOCAL_BRIDGE_PORT } from './demo-ids.js';
@@ -19,6 +25,7 @@ export interface CreateRayzanServerOptions {
   readonly port?: number;
   readonly databasePath?: string;
   readonly events?: EventStore;
+  readonly settings?: SettingsStore;
   readonly publicDir?: string;
 }
 
@@ -26,6 +33,7 @@ export interface RayzanServer {
   readonly runtime: RayzanRuntime;
   readonly server: Server;
   readonly events: EventStore;
+  readonly settings: SettingsStore;
   readonly databasePath?: string;
   readonly host: string;
   readonly port: number;
@@ -49,13 +57,19 @@ export function createRayzanServer(
   const host = options.host ?? '127.0.0.1';
   const port = options.port ?? LOCAL_BRIDGE_PORT;
   const ownsEvents = options.events === undefined;
+  const ownsSettings = options.settings === undefined;
   const publicDir = options.publicDir ?? defaultPublicDir;
   const events =
     options.events ??
     new SqliteEventStore(resolveEventDatabasePath(options.databasePath));
   const databasePath =
     events instanceof SqliteEventStore ? events.path : options.databasePath;
-  const runtime = new RayzanRuntime(events);
+  const settings =
+    options.settings ??
+    (databasePath === undefined
+      ? new InMemorySettingsStore()
+      : new SqliteSettingsStore(databasePath));
+  const runtime = new RayzanRuntime(events, settings);
   runtime.ensureDefaultTeam();
   const context: BridgeContext = {
     ...(databasePath !== undefined ? { databasePath } : {}),
@@ -66,6 +80,7 @@ export function createRayzanServer(
     runtime,
     server,
     events,
+    settings,
     ...(databasePath !== undefined ? { databasePath } : {}),
     host,
     port,
@@ -76,6 +91,9 @@ export function createRayzanServer(
       await closeHttpServer(server);
       if (ownsEvents && events instanceof SqliteEventStore) {
         events.close();
+      }
+      if (ownsSettings && settings instanceof SqliteSettingsStore) {
+        settings.close();
       }
     },
   };

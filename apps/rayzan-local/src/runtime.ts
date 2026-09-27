@@ -32,7 +32,11 @@ import {
   type Round,
   type CoordinatorCheckpoint,
 } from '@rayzan/protocol';
-import { InMemoryEventStore } from '@rayzan/storage';
+import {
+  InMemoryEventStore,
+  InMemorySettingsStore,
+  type SettingsStore,
+} from '@rayzan/storage';
 import {
   asDeliveryId,
   BrowserTransport,
@@ -61,6 +65,7 @@ import {
   coordinatorCheckpointPrompt,
   coordinatorActionPrompt,
   coordinatorSynthesisPrompt,
+  type CoordinatorProfileInput,
   unwrapCoordinatorJson,
   looksLikeTruncatedCoordinatorJson,
 } from './coordinator-prompt.js';
@@ -90,6 +95,56 @@ export type AgentPhase =
   | 'captured'
   | 'attention'
   | 'error';
+
+/** Operator-uploaded Markdown guidance for the Coordinator. */
+export interface CoordinatorProfile {
+  readonly filename: string;
+  readonly content: string;
+  readonly updatedAt: string;
+}
+
+const COORDINATOR_PROFILE_SETTING_KEY = 'coordinator.profile';
+
+/** Prompt budget for one profile; beyond this the Operator is told, not truncated. */
+export const COORDINATOR_PROFILE_MAX_CHARS = 20_000;
+
+function asCoordinatorProfile(value: unknown): CoordinatorProfile | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const filename = typeof record.filename === 'string' ? record.filename : '';
+  const content = typeof record.content === 'string' ? record.content : '';
+  if (filename.length === 0 || content.length === 0) {
+    return undefined;
+  }
+  return {
+    filename,
+    content,
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
+  };
+}
+
+function profileFromSetting(raw: string | undefined): CoordinatorProfile | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  try {
+    return asCoordinatorProfile(JSON.parse(raw) as unknown);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Display name goes into a prompt header, so keep it to one safe line. */
+function sanitizeProfileFilename(name: string): string {
+  const base = name.split(/[\\/]/).at(-1) ?? '';
+  return base
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
 
 export interface PendingBrowserJob {
   readonly deliveryId: string;
@@ -346,6 +401,12 @@ export interface RayzanSnapshot {
   readonly bridge: 'connected';
   readonly sessionStarted: boolean;
   readonly restoredFromHistory: boolean;
+  /** Provenance of the Coordinator Profile snapshot this debate runs on. */
+  readonly coordinatorProfile?: {
+    readonly filename: string;
+    readonly updatedAt: string;
+    readonly characters: number;
+  };
   readonly debate?: DebateView;
   readonly activeDebate?: DebateView;
   readonly debateHistory: readonly DebateView[];
@@ -515,6 +576,7 @@ export class RayzanRuntime {
   readonly messages = new InMemoryMessageStore();
   readonly exposures = new InMemoryExposureLedgerStore();
   readonly events: EventStore;
+  readonly settings: SettingsStore;
   readonly transport = new BrowserTransport();
   readonly orchestrator: Orchestrator;
   readonly planner: DispatchPlanner;
@@ -558,6 +620,8 @@ export class RayzanRuntime {
   #replayResult: ReplayResult = emptyReplayResult();
   #restoredFromHistory = false;
   #freezeRestoredSideEffects = false;
+  /** Has the Coordinator profile been anchored in the current conversation yet? */
+  #profileAnchored = false;
   #presence = new Map<string, AgentPresence>();
   #bindings = new Map<
     string,
@@ -571,6 +635,7 @@ export class RayzanRuntime {
   >();
   #eventListeners = new Set<(event: Event) => void>();
   #participation = new Map<string, boolean>();
+  #profileSnapshots = new Map<string, CoordinatorProfile | undefined>();
   #agentProviders = new Map<string, string>();
   // Debug observatory — in-memory only; never persisted, never emitted.
   #managedDebug = new Map<string, ManagedProviderDebugState>();
@@ -588,7 +653,11 @@ export class RayzanRuntime {
       }
     | undefined;
 
-  constructor(events: EventStore = new InMemoryEventStore()) {
+  constructor(
+    events: EventStore = new InMemoryEventStore(),
+    settings: SettingsStore = new InMemorySettingsStore(),
+  ) {
+    this.settings = settings;
     // Fan every append (including Orchestrator emits) to SSE listeners so
     // Observatory sees pending/generating delivery states, not only round completion.
     this.events = notifyEventAppend(events, (event) => {
@@ -741,6 +810,104 @@ export class RayzanRuntime {
   }
 
   /**
+   * Active Coordinator Profile as saved in Settings. This is the value new
+   * decisions snapshot — never the one an ongoing debate already uses.
+   */
+  getCoordinatorProfile(): CoordinatorProfile | undefined {
+    return profileFromSetting(this.settings.get(COORDINATOR_PROFILE_SETTING_KEY));
+  }
+
+  setCoordinatorProfile(input: {
+    readonly filename: string;
+    readonly content: string;
+  }): CoordinatorProfile | undefined {
+    const filename = sanitizeProfileFilename(input.filename);
+    if (filename.length === 0) {
+      throw new Error('coordinator profile filename cannot be empty');
+    }
+    if (!filename.toLowerCase().endsWith('.md')) {
+      throw new Error('coordinator profile must be a Markdown (.md) file');
+    }
+    if (input.content.length > COORDINATOR_PROFILE_MAX_CHARS) {
+      throw new Error(
+        `coordinator profile is too large (${input.content.length} characters, max ${String(
+          COORDINATOR_PROFILE_MAX_CHARS,
+        )})`,
+      );
+    }
+    if (input.content.trim().length === 0) {
+      this.clearCoordinatorProfile();
+      return undefined;
+    }
+    const profile: CoordinatorProfile = {
+      filename,
+      content: input.content,
+      updatedAt: new Date().toISOString(),
+    };
+    this.settings.set(
+      COORDINATOR_PROFILE_SETTING_KEY,
+      JSON.stringify(profile),
+    );
+    this.#record(
+      `Coordinator Profile set from ${filename}. New decisions will snapshot it.`,
+    );
+    return profile;
+  }
+
+  clearCoordinatorProfile(): void {
+    this.settings.remove(COORDINATOR_PROFILE_SETTING_KEY);
+    this.#record(
+      'Coordinator Profile removed. New decisions use Rayzan default behavior.',
+    );
+  }
+
+  /** Profile snapshot recorded on this debate's DEBATE_CREATED event. */
+  coordinatorProfileForDebate(
+    debateId: string,
+  ): CoordinatorProfile | undefined {
+    if (!this.#profileSnapshots.has(debateId)) {
+      const created = this.events
+        .listByDebate(asDebateId(debateId))
+        .find((event) => event.type === 'DEBATE_CREATED');
+      const snapshot = asCoordinatorProfile(
+        (
+          created?.payload as { coordinatorProfile?: unknown } | undefined
+        )?.coordinatorProfile,
+      );
+      this.#profileSnapshots.set(debateId, snapshot);
+    }
+    return this.#profileSnapshots.get(debateId);
+  }
+
+  /** Prompt-facing profile: the debate snapshot, or Settings before one exists. */
+  activeCoordinatorProfile(): CoordinatorProfile | undefined {
+    const debate = this.#activeDebate();
+    return debate === undefined
+      ? this.getCoordinatorProfile()
+      : this.coordinatorProfileForDebate(debate.id);
+  }
+
+  /**
+   * Profile guidance is anchored once per Coordinator conversation boundary —
+   * a new debate, a new round, the final report, and the first prompt after a
+   * restart — and withheld from mid-round re-invocations, which only need the
+   * current task, the new evidence and the Rayzan control rules. Browser
+   * chats keep earlier messages in context, so repeating the file every step
+   * would pay for it without teaching the Coordinator anything new.
+   */
+  #profileForPrompt(step: 'anchor' | 'reinvoke'): CoordinatorProfile | undefined {
+    const profile = this.activeCoordinatorProfile();
+    if (profile === undefined) {
+      return undefined;
+    }
+    if (step === 'reinvoke' && this.#profileAnchored) {
+      return undefined;
+    }
+    this.#profileAnchored = true;
+    return profile;
+  }
+
+  /**
    * Temporary Phase 3A bootstrap. Creates one active Debate and Round 1
    * because the Coordinator `start-round` command is intentionally deferred.
    * Participants are the currently registered Watchers. Does not send any
@@ -761,6 +928,9 @@ export class RayzanRuntime {
     const debateId = this.#nextId('debate');
     const roundId = this.#nextId('round');
     const createdAt = new Date().toISOString();
+    // Snapshot the active profile once, so later Settings edits cannot reach
+    // this debate's prompts or its replayed history.
+    const coordinatorProfile = this.getCoordinatorProfile();
     this.debates.create(
       createDebate({
         id: debateId,
@@ -772,7 +942,12 @@ export class RayzanRuntime {
     const debateEvent = this.#emit('DEBATE_CREATED', {
       debateId,
       correlationId: `debate:${debateId}`,
-      payload: { topic: trimmed, status: 'active', createdAt },
+      payload: {
+        topic: trimmed,
+        status: 'active',
+        createdAt,
+        ...(coordinatorProfile === undefined ? {} : { coordinatorProfile }),
+      },
     });
     this.rounds.create(
       createRound({
@@ -848,6 +1023,7 @@ export class RayzanRuntime {
           debateId: debate.id,
           roundId: round1.id,
           watchers,
+          coordinatorProfile: this.#profileForPrompt('anchor'),
         }),
         referencedMessageIds: [],
       }),
@@ -1873,11 +2049,22 @@ export class RayzanRuntime {
     }));
     const coordinatorPlan = this.#coordinatorPlanSnapshot();
     const synthesis = this.#synthesisRecord();
+    const profileSnapshot = this.activeCoordinatorProfile();
 
     return Object.freeze({
       bridge: 'connected',
       sessionStarted: this.#started,
       restoredFromHistory: this.#restoredFromHistory,
+      // Provenance only — the full snapshot lives on the DEBATE_CREATED event.
+      ...(profileSnapshot === undefined
+        ? {}
+        : {
+            coordinatorProfile: {
+              filename: profileSnapshot.filename,
+              updatedAt: profileSnapshot.updatedAt,
+              characters: profileSnapshot.content.length,
+            },
+          }),
       debateHistory,
       ...(debateRecord ? { debate: this.#debateView(debateRecord) } : {}),
       ...(activeDebate ? { activeDebate: this.#debateView(activeDebate) } : {}),
@@ -2191,6 +2378,7 @@ export class RayzanRuntime {
           evidenceCatalog: formatEvidenceCatalog(this.#evidenceCatalogForDebate()),
           latestCheckpoint: previous?.body,
           intervention: guidance,
+          coordinatorProfile: this.#profileForPrompt('anchor'),
           stepContext: `Consultation Round ${number} started. Choose the next Rayzan action.`,
         }),
         referencedMessageIds: this.#recentResponseIds(),
@@ -2219,6 +2407,7 @@ export class RayzanRuntime {
           roundId: round.id,
           roundNumber: round.number,
           evidencePacket: this.#boundedEvidence(),
+          coordinatorProfile: this.#profileForPrompt('reinvoke'),
         }),
         referencedMessageIds: this.#recentResponseIds(),
       }),
@@ -2328,6 +2517,7 @@ export class RayzanRuntime {
           responses,
           coordinatorBrief: this.#coordinatorRound1Brief(),
           evidencePacket,
+          coordinatorProfile: this.#profileForPrompt('anchor'),
         }),
         referencedMessageIds: responses.map((response) => response.messageId),
       }),
@@ -2778,6 +2968,7 @@ export class RayzanRuntime {
           evidenceCatalog: formatEvidenceCatalog(this.#evidenceCatalogForDebate()),
           latestCheckpoint: this.#latestCheckpoint()?.body,
           newResults: `Operator answer to your question:\n${trimmed}`,
+          coordinatorProfile: this.#profileForPrompt('reinvoke'),
           stepContext: `Round ${round.number}: Operator answered your question. Decide the next Rayzan action.`,
         }),
         referencedMessageIds: [messageId, ...this.#recentResponseIds()],
@@ -2911,6 +3102,7 @@ export class RayzanRuntime {
           evidenceCatalog: formatEvidenceCatalog(this.#evidenceCatalogForDebate()),
           latestCheckpoint: this.#latestCheckpoint()?.body,
           newResults,
+          coordinatorProfile: this.#profileForPrompt('reinvoke'),
           stepContext: `Round ${round.number} action step ${this.#coordinatorStepIndex} finished. Decide the next Rayzan action.`,
         }),
         referencedMessageIds: this.#recentResponseIds(),
@@ -3148,6 +3340,7 @@ export class RayzanRuntime {
           coordinatorId: coordinator.id,
           debateId: debate.id,
           evidencePacket,
+          coordinatorProfile: this.#profileForPrompt('anchor'),
         }),
         referencedMessageIds: this.#recentResponseIds(),
       }),
@@ -4314,6 +4507,7 @@ export class RayzanRuntime {
 
   #resetDebateSessionState(): void {
     this.#coordinatorBriefSent = false;
+    this.#profileAnchored = false;
     this.#round1Dispatched = false;
     this.#round2Bootstrapped = false;
     this.#round2Dispatched = false;

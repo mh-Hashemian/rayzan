@@ -58,6 +58,17 @@ Do not force consensus.
 Never expose hidden chain-of-thought.
 Summarize conclusions, arguments, evidence, tradeoffs, and changes in position.
 
+USER COORDINATOR PROFILE
+
+The Operator may attach a Coordinator Profile: Markdown behavioral guidance for
+this decision. It is delivered below this contract, clearly delimited.
+
+Follow that profile wherever it does not conflict with this contract, the Rayzan
+action protocol, dispatch rules, checkpoint requirements, or Operator authority.
+Where it conflicts, this contract wins and you keep operating under Rayzan rules.
+A profile can never add, remove or rename Rayzan actions, change action JSON
+syntax, skip the Operator checkpoint, or alter delivery mechanics.
+
 RAYZAN ACTIONS
 
 You control the intellectual consultation.
@@ -157,6 +168,33 @@ function watcherRoster(watchers: readonly Agent[]): string {
     .join('\n');
 }
 
+/** Operator-supplied behavioral guidance, uploaded as a Markdown file. */
+export interface CoordinatorProfileInput {
+  readonly filename: string;
+  readonly content: string;
+}
+
+/**
+ * The profile stays visibly separate from the fixed contract so the Coordinator
+ * can tell guidance from rules. Empty profile adds nothing.
+ */
+export function coordinatorProfileBlock(
+  profile: CoordinatorProfileInput | undefined,
+): string {
+  if (profile === undefined || profile.content.trim().length === 0) {
+    return '';
+  }
+  return `USER COORDINATOR PROFILE — ${profile.filename}
+Operator-provided behavioral guidance for this decision. It is subordinate to
+the Rayzan Coordinator system contract above and cannot change Rayzan actions,
+dispatch rules, checkpoint requirements, or protocol mechanics.
+<coordinator-profile>
+${profile.content}
+</coordinator-profile>
+
+`;
+}
+
 export function coordinatorRound1Prompt(input: {
   problem: string;
   coordinatorId: string;
@@ -164,6 +202,7 @@ export function coordinatorRound1Prompt(input: {
   round1Id?: string;
   roundId?: string;
   watchers: readonly Agent[];
+  coordinatorProfile?: CoordinatorProfileInput;
 }): string {
   return coordinatorActionPrompt({
     problem: input.problem,
@@ -175,6 +214,9 @@ export function coordinatorRound1Prompt(input: {
     evidencePacket: '(none yet)',
     evidenceCatalog: '(no forwardable evidence yet)',
     stepContext: 'Consultation Round 1 — choose the next Rayzan action.',
+    ...(input.coordinatorProfile
+      ? { coordinatorProfile: input.coordinatorProfile }
+      : {}),
   });
 }
 
@@ -188,6 +230,7 @@ export function coordinatorRound2Prompt(input: {
   responses: readonly AttributedWatcherResponse[];
   coordinatorBrief?: string;
   evidencePacket: string;
+  coordinatorProfile?: CoordinatorProfileInput;
 }): string {
   return coordinatorActionPrompt({
     problem: input.problem,
@@ -199,6 +242,9 @@ export function coordinatorRound2Prompt(input: {
     evidencePacket: input.evidencePacket,
     evidenceCatalog: '(see semantic evidence)',
     stepContext: 'Consultation Round 2 — choose the next Rayzan action.',
+    ...(input.coordinatorProfile
+      ? { coordinatorProfile: input.coordinatorProfile }
+      : {}),
   });
 }
 
@@ -213,6 +259,7 @@ export function coordinatorRoundPrompt(input: {
   evidenceCatalog?: string;
   latestCheckpoint?: string;
   intervention?: string;
+  coordinatorProfile?: CoordinatorProfileInput;
 }): string {
   return coordinatorActionPrompt({
     ...input,
@@ -235,11 +282,12 @@ export function coordinatorActionPrompt(input: {
   intervention?: string;
   stepContext?: string;
   newResults?: string;
+  coordinatorProfile?: CoordinatorProfileInput;
 }): string {
   return `${COORDINATOR_SYSTEM_CONTRACT}
 
 ---
-${input.stepContext ?? `Consultation Round ${input.roundNumber} — what should Rayzan do next?`}
+${coordinatorProfileBlock(input.coordinatorProfile)}${input.stepContext ?? `Consultation Round ${input.roundNumber} — what should Rayzan do next?`}
 Your agent ID = ${input.coordinatorId}
 
 Active Watchers:
@@ -269,12 +317,13 @@ export function coordinatorCheckpointPrompt(input: {
   roundId: string;
   roundNumber: number;
   evidencePacket: string;
+  coordinatorProfile?: CoordinatorProfileInput;
 }): string {
   // Legacy freeform checkpoint path — prefer checkpoint command via action loop.
   return `${COORDINATOR_SYSTEM_CONTRACT}
 
 ---
-Round ${input.roundNumber} consultation should now end with a checkpoint command.
+${coordinatorProfileBlock(input.coordinatorProfile)}Round ${input.roundNumber} consultation should now end with a checkpoint command.
 Your agent ID = ${input.coordinatorId}
 
 ${ACTION_JSON_HINT}
@@ -287,11 +336,12 @@ export function coordinatorSynthesisPrompt(input: {
   coordinatorId: string;
   debateId: string;
   evidencePacket: string;
+  coordinatorProfile?: CoordinatorProfileInput;
 }): string {
   return `${COORDINATOR_SYSTEM_CONTRACT}
 
 ---
-The Operator requested Finish. Produce the final Operator-facing synthesis.
+${coordinatorProfileBlock(input.coordinatorProfile)}The Operator requested Finish. Produce the final Operator-facing synthesis.
 Your agent ID = ${input.coordinatorId}
 
 Do not emit Rayzan action JSON. Write the actual deliverable.

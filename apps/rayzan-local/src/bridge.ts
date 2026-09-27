@@ -2,7 +2,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { AGENT_ROLES, type AgentRole } from '@rayzan/protocol';
 
-import { RayzanRuntime } from './runtime.js';
+import {
+  COORDINATOR_PROFILE_MAX_CHARS,
+  RayzanRuntime,
+} from './runtime.js';
 import { desktopStatus } from './status.js';
 import { attachEventStream } from './event-stream.js';
 
@@ -246,6 +249,34 @@ export async function handleBridgeRequest(
     ) {
       runtime.archiveActiveDebate();
       write(response, 200, runtime.snapshot());
+      return true;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/coordinator-profile') {
+      write(response, 200, {
+        profile: runtime.getCoordinatorProfile() ?? null,
+        maxCharacters: COORDINATOR_PROFILE_MAX_CHARS,
+      });
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/coordinator-profile'
+    ) {
+      const body = await readJson(request);
+      const profile = runtime.setCoordinatorProfile({
+        filename: String(body.filename ?? ''),
+        content: String(body.content ?? ''),
+      });
+      write(response, 200, { profile: profile ?? null });
+      return true;
+    }
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/coordinator-profile/remove'
+    ) {
+      runtime.clearCoordinatorProfile();
+      write(response, 200, { profile: null });
       return true;
     }
 

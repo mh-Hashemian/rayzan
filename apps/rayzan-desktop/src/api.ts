@@ -277,6 +277,58 @@ export async function setWatcherParticipation(
   return (await response.json()) as RayzanDesktopStatus;
 }
 
+/** Operator-uploaded Coordinator behavior guidance, stored by the runtime. */
+export interface CoordinatorProfile {
+  readonly filename: string;
+  readonly content: string;
+  readonly updatedAt: string;
+}
+
+interface CoordinatorProfileResponse {
+  readonly profile: CoordinatorProfile | null;
+  readonly maxCharacters?: number;
+}
+
+async function requestCoordinatorProfile(
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<CoordinatorProfileResponse> {
+  const response = await fetch(`${ORIGIN}${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    ...(body === undefined
+      ? {}
+      : {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+  });
+  if (!response.ok) {
+    const error = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(error.error ?? `status ${response.status}`);
+  }
+  return (await response.json()) as CoordinatorProfileResponse;
+}
+
+export async function fetchCoordinatorProfile(): Promise<{
+  profile: CoordinatorProfile | null;
+  maxCharacters: number;
+}> {
+  const body = await requestCoordinatorProfile('/api/coordinator-profile');
+  return { profile: body.profile, maxCharacters: body.maxCharacters ?? 0 };
+}
+
+export async function uploadCoordinatorProfile(input: {
+  filename: string;
+  content: string;
+}): Promise<CoordinatorProfile | null> {
+  const body = await requestCoordinatorProfile('/api/coordinator-profile', input);
+  return body.profile;
+}
+
+export async function removeCoordinatorProfile(): Promise<void> {
+  await requestCoordinatorProfile('/api/coordinator-profile/remove', {});
+}
+
 export function openRuntimeEventStream(onEvent: () => void): () => void {
   const source = new EventSource(`${ORIGIN}/api/events/stream`);
   source.onopen = () => {

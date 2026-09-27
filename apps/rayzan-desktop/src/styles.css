@@ -983,6 +983,52 @@ h2 {
   margin: 0.5rem 0 0;
 }
 
+.coordinator-profile {
+  margin: 1.5rem 0 0.5rem;
+}
+
+.coordinator-profile-none {
+  margin: 0.9rem 0 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 88%, white);
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.coordinator-profile-current {
+  margin: 0.9rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.coordinator-profile-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.coordinator-profile-preview-label {
+  margin: 0.8rem 0 0.3rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.coordinator-profile-preview .md-body {
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.coordinator-profile-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
 .obs-agent-session {
   margin: 0.35rem 0 0;
   font-size: 0.85rem;

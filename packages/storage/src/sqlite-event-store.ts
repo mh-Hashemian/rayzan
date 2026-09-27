@@ -1,5 +1,4 @@
 import { mkdirSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import {
@@ -15,24 +14,7 @@ import {
 import type { DebateId } from '@rayzan/protocol';
 import type Database from 'better-sqlite3';
 
-function loadBetterSqlite3(): typeof Database {
-  const override = process.env.RAYZAN_BETTER_SQLITE3;
-  if (override !== undefined && override.length > 0) {
-    return createRequire(path.join(override, 'package.json'))(
-      'better-sqlite3',
-    ) as typeof Database;
-  }
-  return createRequire(import.meta.url)('better-sqlite3') as typeof Database;
-}
-
-let sqlite3: typeof Database | undefined;
-
-function betterSqlite3(): typeof Database {
-  if (sqlite3 === undefined) {
-    sqlite3 = loadBetterSqlite3();
-  }
-  return sqlite3;
-}
+import { betterSqlite3 } from './better-sqlite3.js';
 
 /** SQLite `PRAGMA user_version`. Independent of Event.schemaVersion. */
 export const EVENT_SCHEMA_VERSION = 2;
