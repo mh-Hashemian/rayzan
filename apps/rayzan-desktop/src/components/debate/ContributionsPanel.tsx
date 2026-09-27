@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { ProviderLogo } from '../providers/ProviderLogo.js';
+import { ResponseViewer } from '../markdown/ResponseViewer.js';
 import type { WatcherContributionView } from './types.js';
 
 export function ContributionsPanel(input: {
@@ -70,9 +71,14 @@ export function ContributionsPanel(input: {
                       <h4>Coordinator request</h4>
                       <pre className="obs-report">{item.prompt}</pre>
                       <h4>Captured response</h4>
-                      <pre className="obs-report">
-                        {item.response?.trim() || '(waiting for response)'}
-                      </pre>
+                      {item.response && item.response.trim().length > 0 ? (
+                        <ResponseViewer
+                          text={item.response}
+                          tone="secondary"
+                        />
+                      ) : (
+                        <pre className="obs-report">(waiting for response)</pre>
+                      )}
                     </article>
                   ))}
                 </div>

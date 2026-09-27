@@ -12,7 +12,7 @@
     "dist": "node scripts/ensure-electron-sqlite.mjs && vite build && electron-builder --win --x64",
     "rebuild-native": "node scripts/ensure-electron-sqlite.mjs --force",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "tsx --test tests/managed-provider.test.ts tests/derive.test.ts"
+    "test": "tsx --test tests/managed-provider.test.ts tests/derive.test.ts tests/markdown.test.tsx"
   },
   "dependencies": {
     "better-sqlite3": "12.11.1",
@@ -30,6 +30,8 @@
     "electron-builder": "^25.1.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vite": "^6.0.11",

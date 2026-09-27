@@ -15,7 +15,9 @@ import { DebateProgress } from './DebateProgress.js';
 import { DebateTimeline } from './DebateTimeline.js';
 import { deriveDebateView } from './derive.js';
 import { InsightsPanel } from './InsightsPanel.js';
+import { MarkdownBody } from '../markdown/MarkdownBody.js';
 import { MOCK_DEBATE_VIEW } from './mock.js';
+import { ResponseViewer } from '../markdown/ResponseViewer.js';
 import { TranscriptPanel } from './TranscriptPanel.js';
 import type { DebateWorkspaceView } from './types.js';
 
@@ -308,7 +310,7 @@ export function DebateWorkspace(input: {
         <section className="obs-final card-panel" id="final-report">
           <p className="obs-eyebrow">Coordinator</p>
           <h2>Final Answer</h2>
-          <pre className="obs-report">{view.synthesis}</pre>
+          <ResponseViewer text={view.synthesis} tone="primary" />
           <div className="wizard-actions">
             <button
               type="button"
@@ -353,7 +355,7 @@ export function DebateWorkspace(input: {
                 (view.awaitingOperator ? 'Current Answer' : 'Reviewing responses…')}
             </h2>
             {view.coordinatorAnswer ? (
-              <pre className="obs-report">{view.coordinatorAnswer}</pre>
+              <ResponseViewer text={view.coordinatorAnswer} tone="primary" />
             ) : (
               <p className="review-copy">
                 The Coordinator answer will appear here after this consultation
@@ -371,7 +373,10 @@ export function DebateWorkspace(input: {
                 Round {view.operatorQuestion.roundNumber} · Clarification
               </p>
               <h2>Coordinator needs your input</h2>
-              <p className="review-copy">{view.operatorQuestion.question}</p>
+              <MarkdownBody
+                text={view.operatorQuestion.question}
+                tone="secondary"
+              />
               <label className="gate-guidance">
                 Your answer
                 <textarea

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import net from 'node:net';
 
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
 
 import './native-sqlite.js';
 import {
@@ -173,6 +173,14 @@ function createMainWindow(): void {
     },
   });
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Rendered Markdown links go to the system browser, never a new Electron
+    // window with this app's session.
+    if (/^https?:\/\//i.test(url)) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
   const rawDevUrl =
     process.env.VITE_DEV_SERVER_URL ?? process.env.ELECTRON_RENDERER_URL;
   const devUrl =
