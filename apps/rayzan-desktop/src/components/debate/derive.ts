@@ -24,7 +24,12 @@ export function deriveDebateView(
   );
   const coordinator = state.agents.find((agent) => agent.role === 'coordinator');
   const hasSynthesis = state.synthesis !== undefined;
-  const framingDone = watchers.some((agent) => agent.round1Status !== 'idle');
+  // Watcher statuses are the primary signal, but a completed Round 1 is
+  // authoritative on its own — restored/replayed sessions can lose the
+  // per-agent round statuses while the round record survives.
+  const framingDone =
+    watchers.some((agent) => agent.round1Status !== 'idle') ||
+    state.round1?.status === 'completed';
 
   const stages = deriveStages({
     sessionStarted: state.sessionStarted || debate !== undefined,
@@ -42,6 +47,7 @@ export function deriveDebateView(
     watcherCount: watchers.length,
     awaitingOperator: state.awaitingOperator,
     synthesisPending: state.synthesisPending,
+    roundProgress: state.roundProgress,
   });
   const contributions = deriveContributions(state);
   const coordinatorAnswer = state.synthesis?.body ?? state.checkpoint?.body;
@@ -233,6 +239,7 @@ function deriveDetails(input: {
   readonly watcherCount: number;
   readonly awaitingOperator: boolean;
   readonly synthesisPending: boolean;
+  readonly roundProgress?: RuntimeDebateState['roundProgress'];
 }): ProgressDetail[] {
   return [
     {
@@ -246,7 +253,13 @@ function deriveDetails(input: {
         : round.status === 'active' || round.status === 'collecting'
           ? 'active'
           : 'waiting') as StageStatus,
-      note: input.watcherCount > 0 ? `${input.watcherCount} Watchers` : undefined,
+      // Only claim Watcher consultation when the round actually dispatched
+      // to someone (expected > 0). A checkpoint without any dispatch must
+      // not render "✓ 2 Watchers".
+      note:
+        input.watcherCount > 0 && (round.number !== 1 || (input.roundProgress?.expected ?? 0) > 0)
+          ? `${input.watcherCount} Watchers`
+          : undefined,
     })),
     ...(input.awaitingOperator && !input.synthesisPending
       ? [{ label: 'Operator decision', status: 'active' as StageStatus }]

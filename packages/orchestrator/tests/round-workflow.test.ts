@@ -178,6 +178,27 @@ describe('RoundWorkflow', () => {
     assert.equal(rounds.listByDebate(debate.id).length, 1);
   });
 
+  it('does not treat a round with zero deliveries as complete', () => {
+    const { workflow, qwen, glm, rounds, debate, round1 } = setup();
+
+    workflow.startRound({
+      roundId: round1.id,
+      participantIds: [qwen.id, glm.id],
+    });
+
+    const progress = workflow.getRoundProgress(round1.id);
+    assert.equal(progress.expected, 0);
+    assert.equal(progress.responded, 0);
+    assert.equal(progress.remaining, 0);
+    // remaining === 0 must not be trivially "complete": no Watcher was
+    // consulted, so the UI must not claim responses were collected.
+    assert.equal(progress.complete, false);
+
+    // A coordinator checkpoint on a never-dispatched round cannot complete it.
+    assert.throws(() => workflow.completeRound(round1.id), OrchestratorError);
+    assert.equal(rounds.getById(round1.id)?.status, 'active');
+  });
+
   it('tracks separate personalized messages in one Round 2 execution', () => {
     const { workflow, coordinator, qwen, deepSeek, glm, debate, rounds } =
       setup();

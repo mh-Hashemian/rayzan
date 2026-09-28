@@ -335,8 +335,12 @@ export class RoundWorkflow {
       (participant) => participant.responded,
     ).length;
     const remaining = expected - responded;
-    // Complete when every contacted Watcher has responded (or nobody was contacted yet).
-    const complete = remaining === 0;
+    // A round with zero watcher deliveries is NOT "complete" — trivially
+    // satisfying "remaining === 0" would let the UI claim Watchers were
+    // consulted when nobody was contacted (e.g. a coordinator checkpoint
+    // without any dispatch). Use 'pending-dispatch' so the UI keeps it in
+    // the waiting/pre-dispatch state.
+    const complete = expected > 0 && remaining === 0;
 
     return Object.freeze({
       roundId,

@@ -54,6 +54,11 @@ export interface RuntimeDebateState {
     readonly number: number;
     readonly status: string;
   }[];
+  readonly roundProgress?: {
+    readonly responded: number;
+    readonly expected: number;
+    readonly complete: boolean;
+  };
   readonly checkpoint?: {
     readonly debateId: string;
     readonly roundId: string;

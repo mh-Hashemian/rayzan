@@ -3035,7 +3035,22 @@ export class RayzanRuntime {
   ): void {
     this.#pendingStepDeliveryIds.clear();
     if (round.status !== 'completed') {
-      this.workflow.completeRound(round.id);
+      try {
+        this.workflow.completeRound(round.id);
+      } catch (error) {
+        // A checkpoint on a round whose Watchers were never dispatched is a
+        // legitimate operator decision point (the coordinator answered
+        // without consulting). Force the completion so the Operator still
+        // gets the gate, and record that no consultation happened.
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/cannot complete round/.test(message)) {
+          throw error;
+        }
+        this.#record(
+          `Round ${round.number} completed without any Watcher responses (checkpoint without consultation).`,
+        );
+        this.workflow.restoreCompleted(round.id);
+      }
       this.#emit('ROUND_COMPLETED', {
         debateId: round.debateId,
         roundId: round.id,
@@ -3844,7 +3859,25 @@ export class RayzanRuntime {
       return 'idle';
     }
     const round1 = this.#roundByNumber(1);
-    const delivery = this.#deliveryFor(agent.id, round1?.id);
+    let delivery = this.#deliveryFor(agent.id, round1?.id);
+    if (
+      delivery === undefined &&
+      round1 !== undefined &&
+      round1.status === 'completed'
+    ) {
+      // The strict roundId lookup can miss after restore/replay (deliveries
+      // without a roundId, or a round whose id drifted across restarts).
+      // Fall back to "any response from this watcher in this debate" so a
+      // completed round does not report its watchers as idle.
+      delivery = this.transport
+        .listAll()
+        .filter(
+          (candidate) =>
+            candidate.recipientId === agent.id &&
+            candidate.status === 'responded',
+        )
+        .at(-1);
+    }
     if (
       this.#presence.get(agent.id)?.phase === 'error' &&
       delivery?.status !== 'responded'
