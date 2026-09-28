@@ -34,6 +34,15 @@ export interface CaptureTurn {
   readonly finalText: string;
   readonly connected?: boolean;
   readonly element?: unknown;
+  /** Provider-script extraction diagnostics (e.g. GLM tier lengths). */
+  readonly __rayzanDebug?: {
+    readonly t1Len?: number;
+    readonly t2Len?: number;
+    readonly t3Len?: number;
+    readonly rawLen?: number;
+    readonly hostInDom?: boolean;
+    readonly childCount?: number;
+  };
 }
 
 export interface CaptureSnapshot {

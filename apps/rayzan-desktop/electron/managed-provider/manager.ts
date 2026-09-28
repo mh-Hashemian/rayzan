@@ -982,11 +982,15 @@ export class ManagedProviderManager {
       if (evaluation.generationEndedAt !== undefined) {
         debug.setGeneration(providerId, 'ended');
       }
-      debug.transition(
-        providerId,
-        'capture-failed',
-        evaluation.failure ?? 'unknown',
-      );
+      let detail = evaluation.failure ?? 'unknown';
+      // Temporary GLM extraction diagnostics: on a thinking-only failure the
+      // tiers' lengths tell us whether the measure host, the strip logic, or
+      // a shadow/iframe boundary ate the answer. Remove with __rayzanDebug.
+      const turnDebug = evaluation.tracked?.__rayzanDebug;
+      if (evaluation.failure === 'thinking-only' && turnDebug) {
+        detail = `thinking-only ${JSON.stringify(turnDebug)}`;
+      }
+      debug.transition(providerId, 'capture-failed', detail);
       return;
     }
     if (evaluation.sawGenerating && evaluation.generationEndedAt === undefined) {

@@ -152,6 +152,18 @@ class StubElement {
     return [{}];
   }
 
+  /** True when this node is an ancestor of (or is) the given node. */
+  contains(node: StubElement | null): boolean {
+    let current: StubElement | null = node;
+    while (current !== null) {
+      if (current === this) {
+        return true;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
   /** Swap the innerText block source (used to model collapse-on-strip). */
   setInnerTextBlocks(blocks: readonly string[]): void {
     this.#innerTextBlocks = blocks;

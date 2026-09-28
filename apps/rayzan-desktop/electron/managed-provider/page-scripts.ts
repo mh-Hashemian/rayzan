@@ -752,11 +752,15 @@ export const glmPageScript = `
         }
         measureHost.replaceChildren(clone);
         let text = '';
+        let t1Len = 0;
+        let t2Len = 0;
+        let t3Len = 0;
         try {
           text = (clone.innerText || '').trim();
         } catch (_) {
           text = (clone.textContent || '').trim();
         } finally {
+          t1Len = text.length;
           measureHost.replaceChildren();
         }
         // GLM 5.3 sometimes wraps the ENTIRE reply — reasoning collapse AND
@@ -780,6 +784,7 @@ export const glmPageScript = `
           } catch (_) {
             text = (partial.textContent || '').trim();
           } finally {
+            t2Len = text.length;
             measureHost.replaceChildren();
           }
         }
@@ -791,8 +796,15 @@ export const glmPageScript = `
           } catch (_) {
             text = (unstripped.textContent || '').trim();
           } finally {
+            t3Len = text.length;
             measureHost.replaceChildren();
           }
+        }
+        let rawLen = 0;
+        try {
+          rawLen = (el.innerText || '').length;
+        } catch (_) {
+          rawLen = -1;
         }
         const thinking = el.querySelector(
           '.thinking-chain-container, [class*="thinking-chain"]'
@@ -803,6 +815,18 @@ export const glmPageScript = `
           thinkingOnly: Boolean(thinking) && !hasFinalAnswer,
           hasFinalAnswer,
           finalText: text,
+          // Temporary extraction diagnostics — which tier produced text, how
+          // much the original element reports, and whether the measure host
+          // is really in the document. Remove once the GLM thinking-only
+          // stall is diagnosed.
+          __rayzanDebug: {
+            t1Len,
+            t2Len,
+            t3Len,
+            rawLen,
+            hostInDom: document.body.contains(measureHost),
+            childCount: el.children.length,
+          },
         };
       });
       const stopEl = [...document.querySelectorAll(

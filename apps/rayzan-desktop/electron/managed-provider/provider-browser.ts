@@ -707,6 +707,7 @@ export class ProviderBrowserHost {
         thinkingOnly: boolean;
         hasFinalAnswer: boolean;
         finalText: string;
+        __rayzanDebug?: CaptureTurn['__rayzanDebug'];
       }[];
     };
     const turns = snap.turns ?? [];
