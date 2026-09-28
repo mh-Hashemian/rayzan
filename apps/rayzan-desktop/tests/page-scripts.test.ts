@@ -22,6 +22,10 @@ class StubElement {
   disabled = false;
   textContent = '';
   style: Record<string, string> = {};
+  /** Chromium element node type (1 = ELEMENT_NODE). */
+  nodeType = 1;
+  /** Open shadow root attached to this element (Chromium: cloneNode skips it). */
+  shadowRoot: StubElement | null = null;
   #attached: () => boolean;
   #innerTextBlocks: readonly string[];
 
@@ -31,6 +35,10 @@ class StubElement {
   ) {
     this.#attached = attached;
     this.#innerTextBlocks = innerTextBlocks;
+  }
+
+  get childNodes(): StubElement[] {
+    return this.children;
   }
 
   get innerText(): string {
@@ -49,20 +57,42 @@ class StubElement {
   /**
    * innerText of a container derives from its children: each block child
    * contributes its own innerText on its own line. Nodes with explicit blocks
-   * report those; otherwise the recursive child join is used. This mirrors
-   * how Chromium computes innerText for attached elements.
+   * report those; otherwise the recursive child join is used. Shadow-root
+   * children render inside the host (composed tree), mirroring Chromium.
+   * This mirrors how Chromium computes innerText for attached elements.
    */
   layoutText(): string {
+    if (this.nodeType !== 1) {
+      return this.textContent;
+    }
     if (this.#innerTextBlocks.length > 0) {
       return this.#innerTextBlocks.join('\n');
     }
-    if (this.children.length === 0) {
+    const parts: string[] = [];
+    for (const child of this.children) {
+      const text =
+        child.nodeType !== 1
+          ? child.textContent // text node
+          : child.layoutText();
+      if (text.length > 0) {
+        parts.push(text);
+      }
+    }
+    if (this.shadowRoot !== null) {
+      for (const child of this.shadowRoot.children) {
+        const text =
+          child.nodeType !== 1
+            ? child.textContent // text node
+            : child.layoutText();
+        if (text.length > 0) {
+          parts.push(text);
+        }
+      }
+    }
+    if (parts.length === 0) {
       return this.textContent;
     }
-    return this.children
-      .map((child) => child.layoutText())
-      .filter((part) => part.length > 0)
-      .join('\n');
+    return parts.join('\n');
   }
 
   replaceChildren(...kids: StubElement[]): void {
@@ -142,6 +172,8 @@ class StubElement {
     copy.disabled = this.disabled;
     copy.textContent = this.textContent;
     copy.parent = null;
+    // Chromium semantics: cloneNode(true) does NOT copy shadow roots. This is
+    // exactly why clone-based extraction reads empty on shadow-DOM variants.
     for (const child of this.children) {
       copy.appendChild(child.cloneNode());
     }
@@ -162,6 +194,23 @@ class StubElement {
       current = current.parent;
     }
     return false;
+  }
+
+  /**
+   * Attach the element's textContent as a text-node child (nodeType 3), the
+   * way real DOM represents text. Text-node stubs are leaf objects that only
+   * need nodeType + textContent for the capture walk.
+   */
+  withTextNode(): this {
+    if (this.textContent.length > 0 && this.children.length === 0) {
+      const textNode = {
+        nodeType: 3,
+        textContent: this.textContent,
+      } as unknown as StubElement;
+      textNode.parent = this;
+      this.children.push(textNode);
+    }
+    return this;
   }
 
   /** Swap the innerText block source (used to model collapse-on-strip). */
@@ -423,6 +472,61 @@ describe('managed page scripts', () => {
     assert.equal(turn0.hasFinalAnswer, true);
     assert.equal(turn0.thinkingOnly, false);
     assert.equal(snap.last, 'The actual answer');
+  });
+
+  it('GLM: shadow-root answer is captured via the text walk (tier 3)', () => {
+    const document = makeDocument();
+    const api = loadPageScript(glmPageScript, document);
+
+    // Managed renderer shape: chat.z.ai's shadow-DOM variant. The
+    // .chat-assistant host has an OPEN shadow root holding the answer and an
+    // empty light DOM. cloneNode(true) does not copy shadow roots, so tiers
+    // 1 and 2 read empty on every clone; only the original-element walk (tier
+    // 3) sees the text. The reasoning subtree inside the shadow root is
+    // skipped by class.
+    //
+    //   <div class="chat-assistant">          ← light DOM empty
+    //     #shadowRoot (open)
+    //       <div class="thinking-chain-container my-4">
+    //         <div class="collapse-body">Thought Process… cobalt reasoning</div>
+    //       </div>
+    //       <p class="answer">cobalt</p>
+    //   </div>
+    const turn = el(document, { className: 'chat-assistant' });
+    const shadow = el(document, {});
+    shadow.tagName = '#DOCUMENT-FRAGMENT';
+    shadow.nodeType = 11; // SHADOW_ROOT-like fragment
+    const collapse = el(document, { className: 'thinking-chain-container my-4' });
+    const reasoningBody = el(document, { className: 'collapse-body' });
+    reasoningBody.textContent = 'Thought Process: the user asked about the mineral…';
+    reasoningBody.withTextNode();
+    collapse.appendChild(reasoningBody);
+    const answer = el(document, { className: 'answer', tag: 'p' });
+    answer.textContent = 'cobalt';
+    answer.withTextNode();
+    shadow.append(collapse, answer);
+    turn.shadowRoot = shadow;
+    document.body.appendChild(turn);
+
+    const snap = api.snapshot();
+    const turn0 = snap.turns[0]!;
+    assert.equal(turn0.finalText, 'cobalt');
+    assert.equal(turn0.hasFinalAnswer, true);
+    assert.equal(turn0.thinkingOnly, false);
+    assert.equal(snap.last, 'cobalt');
+
+    // Diagnostics: clones empty (shadow roots not copied), tier-3 walk got
+    // the answer, shadow detected at depth 1. rawTextLen (light-DOM
+    // textContent) is 0 while rawLen > 0 — the definitive shadow-only
+    // signature. rawLen (composed innerText on the original) includes the
+    // reasoning body too, just as Chromium renders it.
+    const debug = turn0.__rayzanDebug!;
+    assert.equal(debug.t1Len, 0);
+    assert.equal(debug.t2Len, 0);
+    assert.equal(debug.t3Len, 'cobalt'.length);
+    assert.ok(debug.rawLen > 'cobalt'.length, 'composed innerText includes reasoning + answer');
+    assert.equal(debug.rawTextLen, 0);
+    assert.equal(debug.shadowRootDepth, 1);
   });
 
   it('Qwen: sendPrompt throws when the submit never takes effect', async () => {

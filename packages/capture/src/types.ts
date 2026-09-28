@@ -40,6 +40,8 @@ export interface CaptureTurn {
     readonly t2Len?: number;
     readonly t3Len?: number;
     readonly rawLen?: number;
+    readonly rawTextLen?: number;
+    readonly shadowRootDepth?: number;
     readonly hostInDom?: boolean;
     readonly childCount?: number;
   };

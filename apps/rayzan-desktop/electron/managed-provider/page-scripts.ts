@@ -788,17 +788,31 @@ export const glmPageScript = `
             measureHost.replaceChildren();
           }
         }
+        // TIER 3 (was: unstripped clone — replaced): text-node walk on the
+        // original. cloneNode(true) does NOT copy shadow roots, so when the
+        // managed renderer serves chat.z.ai's shadow-DOM variant every clone
+        // reads empty while the original element's innerText sees the answer
+        // (confirmed via __rayzanDebug: rawLen>0, t1=t2=t3=0). The walk
+        // recurses into node.shadowRoot when present and skips the reasoning
+        // subtree by class, so "Thought Process" text is never captured.
         if (text.length === 0) {
-          const unstripped = el.cloneNode(true);
-          measureHost.replaceChildren(unstripped);
-          try {
-            text = (unstripped.innerText || '').trim();
-          } catch (_) {
-            text = (unstripped.textContent || '').trim();
-          } finally {
-            t3Len = text.length;
-            measureHost.replaceChildren();
-          }
+          const SKIP = /thinking-chain|thinking-content|Thinking/;
+          const walk = (node) => {
+            if (node.nodeType === 3) return node.textContent || '';
+            if (node.nodeType !== 1) return '';
+            const tag = node.tagName;
+            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return '';
+            const cls = typeof node.className === 'string' ? node.className : '';
+            if (SKIP.test(cls)) return '';
+            let out = '';
+            for (const c of node.childNodes) out += walk(c);
+            if (node.shadowRoot) {
+              for (const c of node.shadowRoot.childNodes) out += walk(c);
+            }
+            return out;
+          };
+          text = walk(el).replace(/\s+/g, ' ').trim();
+          t3Len = text.length;
         }
         let rawLen = 0;
         try {
@@ -806,6 +820,26 @@ export const glmPageScript = `
         } catch (_) {
           rawLen = -1;
         }
+        // Shadow-DOM proof points: rawTextLen is el.textContent on the
+        // original (0 while rawLen > 0 ⇒ the text is shadow-only, since
+        // textContent does not pierce shadow roots either); shadowRootDepth
+        // is how deep the first shadowRoot under el sits (0 = none).
+        let rawTextLen = 0;
+        try {
+          rawTextLen = (el.textContent || '').length;
+        } catch (_) {
+          rawTextLen = -1;
+        }
+        let shadowRootDepth = 0;
+        const depthScan = (node, depth) => {
+          if (node.nodeType !== 1 || shadowRootDepth > 0) return;
+          if (node.shadowRoot) {
+            shadowRootDepth = depth;
+            return;
+          }
+          for (const c of node.childNodes) depthScan(c, depth + 1);
+        };
+        depthScan(el, 1);
         const thinking = el.querySelector(
           '.thinking-chain-container, [class*="thinking-chain"]'
         );
@@ -824,6 +858,8 @@ export const glmPageScript = `
             t2Len,
             t3Len,
             rawLen,
+            rawTextLen,
+            shadowRootDepth,
             hostInDom: document.body.contains(measureHost),
             childCount: el.children.length,
           },
