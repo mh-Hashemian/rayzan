@@ -413,6 +413,40 @@ export const deepseekPageScript = `
     observe() {
       return this.snapshot();
     },
+    // Browser-scheduling settle for the capture terminal boundary: after the
+    // generation control disappears, DeepSeek may still commit final assistant
+    // content in later render frames. Wait for paint boundaries plus a quiet
+    // mutation check — never a fixed delay.
+    async readSettledTurn() {
+      const frames = () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+      let settled = this.snapshot();
+      for (let i = 0; i < 4; i += 1) {
+        let mutated = false;
+        const mo = new MutationObserver(() => {
+          mutated = true;
+        });
+        mo.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true,
+        });
+        await frames();
+        mo.disconnect();
+        const next = this.snapshot();
+        const changed =
+          mutated ||
+          next.last !== settled.last ||
+          next.count !== settled.count ||
+          next.generating !== settled.generating;
+        settled = next;
+        if (!changed) break;
+      }
+      return settled;
+    },
     waitForDomChange(timeoutMs) {
       const ms = typeof timeoutMs === 'number' ? timeoutMs : 250;
       return new Promise((resolve) => {
@@ -496,12 +530,43 @@ export const qwenPageScript = `
       else field.value = text;
       field.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 120));
+      const before = this.snapshot();
       const send = document.querySelector(
         '.message-input-right-button-send button.send-button[aria-label="Send"], button.send-button[aria-label="Send"], button[aria-label="Send"]'
       );
-      if (send && !send.disabled) send.click();
-      else field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      return { ok: true };
+      let via = 'none';
+      if (send && !send.disabled) {
+        send.click();
+        via = 'click';
+      } else {
+        field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        via = 'enter';
+      }
+      // Verify the submit actually took: Qwen's click/Enter is silently
+      // ignored on some layouts (guest sessions, slow hydration), which used
+      // to report ok:true while nothing was sent — capture then waited for a
+      // turn that never came and the manager retried the delivery forever.
+      // Accept a cleared composer, a visible Stop control, or a new assistant
+      // turn as proof the message was accepted.
+      let submitted = false;
+      for (let i = 0; i < 30; i += 1) {
+        await new Promise((r) => setTimeout(r, 100));
+        const now = this.snapshot();
+        if (
+          (field.value || '').trim().length === 0 ||
+          now.generating ||
+          now.count > before.count
+        ) {
+          submitted = true;
+          break;
+        }
+      }
+      if (!submitted) {
+        throw new Error(
+          'Qwen submit did not take effect: composer not cleared, no Stop control, and no new assistant turn within 3s'
+        );
+      }
+      return { ok: true, via };
     },
     snapshot() {
       const turns = [...document.querySelectorAll(
@@ -567,6 +632,11 @@ export const qwenPageScript = `
 export const glmPageScript = `
 (() => {
   const api = {
+    // Per-turn stop tracking (see snapshot()): a Stop-button flicker must not
+    // end generation while the answer is still streaming in.
+    __rayzanTurnCount: -1,
+    __rayzanSawStop: false,
+    __rayzanStopAbsentAt: 0,
     probe() {
       const field = document.querySelector('#chat-input, textarea#chat-input');
       const shell = Boolean(
@@ -614,10 +684,39 @@ export const glmPageScript = `
       else field.value = text;
       field.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 120));
+      const before = this.snapshot();
       const send = document.querySelector('#send-message-button');
-      if (send && !send.disabled) send.click();
-      else field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      return { ok: true };
+      let via = 'none';
+      if (send && !send.disabled) {
+        send.click();
+        via = 'click';
+      } else {
+        field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        via = 'enter';
+      }
+      // Verify the submit actually started: a user turn must appear (or the
+      // composer must clear) shortly after sending. GLM silently ignores
+      // Enter keydowns on some layouts, which used to report ok:true while
+      // nothing was ever sent — leaving capture waiting on a turn that never
+      // comes.
+      let submitted = false;
+      for (let i = 0; i < 20; i += 1) {
+        await new Promise((r) => setTimeout(r, 100));
+        const now = this.snapshot();
+        if (
+          now.count > before.count ||
+          (field.value || '').trim().length === 0
+        ) {
+          submitted = true;
+          break;
+        }
+      }
+      if (!submitted) {
+        throw new Error(
+          'GLM submit did not take effect: neither a new user turn nor a cleared composer within 2s'
+        );
+      }
+      return { ok: true, via };
     },
     snapshot() {
       let turns = [...document.querySelectorAll('.chat-assistant')];
@@ -626,6 +725,24 @@ export const glmPageScript = `
           (el) => !el.closest('.user-message')
         );
       }
+      // innerText on a DETACHED clone behaves like textContent in Chromium:
+      // block elements fuse together ("...ConfigurationsSummary:..." with no
+      // separator) and mid-word truncations slip through as "complete" text.
+      // Attach the clone to a hidden container first so innerText performs
+      // real layout and preserves block boundaries.
+      let measureHost = document.getElementById('__rayzanMeasureHost');
+      if (!measureHost) {
+        measureHost = document.createElement('div');
+        measureHost.id = '__rayzanMeasureHost';
+        const style = measureHost.style;
+        style.position = 'fixed';
+        style.left = '-99999px';
+        style.top = '0';
+        style.width = '800px';
+        style.visibility = 'hidden';
+        style.pointerEvents = 'none';
+        document.body.appendChild(measureHost);
+      }
       const mapped = turns.map((el, index) => {
         const clone = el.cloneNode(true);
         for (const t of clone.querySelectorAll(
@@ -633,7 +750,50 @@ export const glmPageScript = `
         )) {
           t.remove();
         }
-        const text = (clone.innerText || '').trim();
+        measureHost.replaceChildren(clone);
+        let text = '';
+        try {
+          text = (clone.innerText || '').trim();
+        } catch (_) {
+          text = (clone.textContent || '').trim();
+        } finally {
+          measureHost.replaceChildren();
+        }
+        // GLM 5.3 sometimes wraps the ENTIRE reply — reasoning collapse AND
+        // final answer — inside .thinking-chain-container. Stripping it then
+        // leaves text === '' and the turn stuck as thinkingOnly forever (the
+        // capture machine holds generating until the watchdog). Re-measure
+        // with only the reasoning body removed, so the answer is preserved;
+        // if even that yields nothing, fall back to the fully unstripped
+        // clone (reasoning renders alongside the answer — losing the answer
+        // is worse).
+        if (text.length === 0) {
+          const partial = el.cloneNode(true);
+          for (const t of partial.querySelectorAll(
+            '.thinking-content, [class*="thinking-content"]'
+          )) {
+            t.remove();
+          }
+          measureHost.replaceChildren(partial);
+          try {
+            text = (partial.innerText || '').trim();
+          } catch (_) {
+            text = (partial.textContent || '').trim();
+          } finally {
+            measureHost.replaceChildren();
+          }
+        }
+        if (text.length === 0) {
+          const unstripped = el.cloneNode(true);
+          measureHost.replaceChildren(unstripped);
+          try {
+            text = (unstripped.innerText || '').trim();
+          } catch (_) {
+            text = (unstripped.textContent || '').trim();
+          } finally {
+            measureHost.replaceChildren();
+          }
+        }
         const thinking = el.querySelector(
           '.thinking-chain-container, [class*="thinking-chain"]'
         );
@@ -656,12 +816,36 @@ export const glmPageScript = `
       // Match extension glmIsGenerating: a disabled Send with visible answer
       // text must NOT keep capture stuck in "generating".
       const sendDisabled = Boolean(send && send.disabled);
+      // GLM's Stop control flickers: it can vanish for one render frame while
+      // streaming continues, then reappear. With the raw "stop visible"
+      // signal alone, generating flips false the moment any text exists and
+      // capture grabs a mid-stream fragment. Track per-turn stop visibility:
+      // once the Stop control has been seen for the current turn, treat the
+      // turn as still generating until the stop has stayed absent for a full
+      // stable-read interval. The flag resets when a new turn appears.
+      const turnCount = mapped.filter((t) => t.finalText || t.thinkingOnly).length;
+      if (api.__rayzanTurnCount !== turnCount) {
+        api.__rayzanTurnCount = turnCount;
+        api.__rayzanSawStop = false;
+        api.__rayzanStopAbsentAt = 0;
+      }
+      let stopRecentlyAbsent = false;
+      if (stopEl) {
+        api.__rayzanSawStop = true;
+        api.__rayzanStopAbsentAt = 0;
+      } else if (api.__rayzanSawStop) {
+        if (api.__rayzanStopAbsentAt === 0) {
+          api.__rayzanStopAbsentAt = Date.now();
+        }
+        stopRecentlyAbsent = Date.now() - api.__rayzanStopAbsentAt < 1000;
+      }
       const generating =
         Boolean(stopEl) ||
         Boolean(mapped.at(-1)?.thinkingOnly) ||
-        (sendDisabled && lastText.length === 0);
+        (sendDisabled && lastText.length === 0) ||
+        stopRecentlyAbsent;
       return {
-        count: mapped.filter((t) => t.finalText || t.thinkingOnly).length,
+        count: turnCount,
         last: lastText,
         generating,
         turns: mapped,
@@ -669,6 +853,41 @@ export const glmPageScript = `
     },
     observe() {
       return this.snapshot();
+    },
+    // Browser-scheduling settle for the capture terminal boundary: after the
+    // generation control disappears, GLM (chat.z.ai) re-renders thinking
+    // chains and virtualized message rows, so an immediate re-read can catch
+    // a transient state and leave capture unconfirmed forever. Wait for paint
+    // boundaries plus a quiet mutation check — never a fixed delay.
+    async readSettledTurn() {
+      const frames = () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+      let settled = this.snapshot();
+      for (let i = 0; i < 4; i += 1) {
+        let mutated = false;
+        const mo = new MutationObserver(() => {
+          mutated = true;
+        });
+        mo.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true,
+        });
+        await frames();
+        mo.disconnect();
+        const next = this.snapshot();
+        const changed =
+          mutated ||
+          next.last !== settled.last ||
+          next.count !== settled.count ||
+          next.generating !== settled.generating;
+        settled = next;
+        if (!changed) break;
+      }
+      return settled;
     },
     waitForDomChange(timeoutMs) {
       const ms = typeof timeoutMs === 'number' ? timeoutMs : 250;

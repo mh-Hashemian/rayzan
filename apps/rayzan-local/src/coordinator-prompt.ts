@@ -350,18 +350,73 @@ Semantic evidence:
 ${input.evidencePacket}`;
 }
 
+/**
+ * GLM (chat.z.ai) and other providers emit JSON command batches whose string
+ * values contain raw newlines, carriage returns, and tabs — standard LLM
+ * output for Markdown checkpoint content (`## Result` headings, multi-line
+ * bodies). Raw C0 control characters are illegal inside JSON string literals,
+ * so JSON.parse rejects an otherwise complete batch. Escape them — but only
+ * inside string literals, where they are illegal; outside strings they are
+ * legal whitespace and must stay untouched.
+ */
+export function escapeControlCharsInJsonStrings(text: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (!inString) {
+      if (ch === '"') {
+        inString = true;
+      }
+      out += ch;
+      continue;
+    }
+    if (escaped) {
+      // Second half of an existing \X escape — emit verbatim.
+      escaped = false;
+      out += ch;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      out += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = false;
+      out += ch;
+      continue;
+    }
+    const code = ch.codePointAt(0) ?? 0;
+    if (code >= 0x20) {
+      out += ch;
+      continue;
+    }
+    if (ch === '\n') {
+      out += '\\n';
+    } else if (ch === '\r') {
+      out += '\\r';
+    } else if (ch === '\t') {
+      out += '\\t';
+    } else {
+      out += `\\u${code.toString(16).padStart(4, '0')}`;
+    }
+  }
+  return out;
+}
+
 export function unwrapCoordinatorJson(text: string): string {
   const trimmed = text.trim();
   const fenced = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(trimmed);
   if (fenced?.[1]) {
-    return fenced[1].trim();
+    return escapeControlCharsInJsonStrings(fenced[1].trim());
   }
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');
   if (start >= 0 && end > start) {
-    return trimmed.slice(start, end + 1);
+    return escapeControlCharsInJsonStrings(trimmed.slice(start, end + 1));
   }
-  return trimmed;
+  return escapeControlCharsInJsonStrings(trimmed);
 }
 
 export function looksLikeTruncatedCoordinatorJson(text: string): boolean {

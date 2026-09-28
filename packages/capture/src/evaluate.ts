@@ -1,6 +1,7 @@
 import {
   GENERATION_WATCHDOG_MS,
   NEW_TURN_WATCHDOG_MS,
+  UNOBSERVED_QUIET_MS,
   type CaptureFailureReason,
   type CaptureObservation,
   type CapturePhase,
@@ -46,7 +47,8 @@ export function initialCaptureState(now: number): CaptureMachineState {
 /**
  * Evaluate one observation.
  *
- * Happy path: new turn + generation ended + readable text → captured.
+ * Happy path: new turn + generation observed and ended + readable text →
+ * confirmed across the terminal boundary → captured.
  * Timers are watchdogs only (new-turn / generation timeouts).
  */
 export function evaluateCapture(input: {
@@ -198,6 +200,53 @@ export function evaluateCapture(input: {
       generationStartedAt,
       generationEndedAt,
     });
+  }
+
+  // Guard against the text-before-stop-button race: a provider can paint the
+  // first streaming chunk before mounting its generation control, so a turn
+  // with text but no observed generation yet may still be mid-stream. When
+  // generation was never observed, the terminal transition is only trusted
+  // after the text has stayed unchanged across a quiet window — fast polling
+  // (MutationObserver can fire every ~85ms) must not confirm it (see
+  // debate-257: captured `{"version": 1,` after 85ms). A generation signal
+  // observed earlier keeps the normal terminal-boundary flow.
+  if (!sawGenerating) {
+    const textChanged = text !== input.state.lastText;
+    const lastChangeAt = textChanged ? input.now : input.state.lastChangeAt;
+    const quietFor = input.now - lastChangeAt;
+    if (quietFor < UNOBSERVED_QUIET_MS) {
+      if (input.now - input.state.startedAt >= generationTimeoutMs) {
+        return fail(input, 'generation-timeout', connected, tracked, {
+          sawGenerating,
+          generationStartedAt,
+          generationEndedAt,
+        });
+      }
+      return {
+        phase: 'generating',
+        tracked,
+        lastText: text,
+        lastChangeAt,
+        trackedConnected: connected,
+        sawGenerating,
+        generationStartedAt,
+        generationEndedAt,
+      };
+    }
+    // Quiet long enough with no generation signal: treat this observation as
+    // the terminal boundary, then still require the normal confirming read.
+    if (input.state.generationEndedAt === undefined) {
+      return {
+        phase: 'reading-final-response',
+        tracked,
+        lastText: text,
+        lastChangeAt,
+        trackedConnected: connected,
+        sawGenerating,
+        generationStartedAt,
+        generationEndedAt: input.now,
+      };
+    }
   }
 
   // Terminal signal just observed (provider generation control gone). The

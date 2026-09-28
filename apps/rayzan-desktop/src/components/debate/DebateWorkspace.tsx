@@ -294,13 +294,13 @@ export function DebateWorkspace(input: {
           {view.canRetryCoordinatorDispatch ? (
             <button
               type="button"
-              className="btn"
+              className="btn primary"
               disabled={retryBusy}
               onClick={() => {
                 void retryDispatch();
               }}
             >
-              {retryBusy ? 'Retrying…' : 'Retry Watcher dispatch'}
+              {retryBusy ? 'Retrying…' : 'Re-invoke Coordinator'}
             </button>
           ) : null}
         </div>

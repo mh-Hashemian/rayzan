@@ -12,7 +12,7 @@
     "dist": "node scripts/ensure-electron-sqlite.mjs && node scripts/ensure-esbuild-pack.mjs && vite build && node scripts/package-desktop.mjs",
     "rebuild-native": "node scripts/ensure-electron-sqlite.mjs --force",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "tsx --test tests/managed-provider.test.ts tests/derive.test.ts tests/markdown.test.tsx tests/team.test.tsx"
+    "test": "tsx --test tests/managed-provider.test.ts tests/derive.test.ts tests/markdown.test.tsx tests/team.test.tsx tests/page-scripts.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "12.11.1",

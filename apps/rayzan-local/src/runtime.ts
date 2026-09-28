@@ -2182,9 +2182,12 @@ export class RayzanRuntime {
       ...(this.#lastError && this.#activeDebate() !== undefined
         ? { lastError: this.#lastError }
         : {}),
+      // Retry is available whenever a live debate has an unusable Coordinator
+      // response (parse failure) or the Round 1 brief was never dispatched.
       ...(this.#activeDebate() !== undefined &&
-      !this.#round1Dispatched &&
-      this.#coordinatorCommandText() !== undefined
+      this.#activeConsultationRound() !== undefined &&
+      (this.#lastError !== undefined ||
+        (!this.#round1Dispatched && this.#coordinatorCommandText() !== undefined))
         ? { canRetryCoordinatorDispatch: true }
         : {}),
       log: [...this.#log],
@@ -3169,22 +3172,83 @@ export class RayzanRuntime {
   }
 
   /**
-   * Re-run the latest Coordinator Round 1 JSON after a parse/dispatch failure
-   * (for example a reused example messageId from a prior debate).
+   * Re-invoke the Coordinator after a parse failure or a lost/mid-stream
+   * capture. The old behavior re-parsed the same stale text, which could never
+   * succeed for a truncated response; now the Coordinator is re-prompted with
+   * the same step context so the debate actually continues. The unusable
+   * delivery is quarantined first so the browser manager polls the new one.
    */
   retryCoordinatorDispatch(): void {
     this.#requireStarted();
-    if (this.#round1Dispatched) {
-      throw new Error('Round 1 Watcher brief already dispatched');
+    const debate = this.#activeDebate();
+    if (debate === undefined) {
+      throw new Error('No active debate to retry');
     }
-    const text = this.#coordinatorCommandText();
-    if (text === undefined) {
-      throw new Error('No Coordinator response available to retry');
+    const coordinator = this.#requireSingleCoordinator();
+    const round = this.#activeConsultationRound();
+    if (round === undefined) {
+      throw new Error('No active consultation round to retry');
     }
-    this.#handleCoordinatorResponse(text);
-    if (this.#lastError !== undefined) {
-      throw new Error(this.#lastError);
+    // Quarantine the Coordinator's unusable deliveries for this debate so the
+    // re-prompt becomes the only pollable job.
+    const stale = [
+      ...this.transport.listPendingForAgent(coordinator.id),
+      ...this.transport.listAwaitingResponseForAgent(coordinator.id),
+    ].filter((item) => item.debateId === debate.id);
+    for (const delivery of stale) {
+      this.#quarantineDelivery(
+        delivery.id,
+        'SUPERSEDED',
+        'Operator retried the Coordinator dispatch after a parse/capture failure',
+      );
     }
+    this.#pendingCoordinatorDeliveryId = undefined;
+    this.#coordinatorDecisionPending = true;
+    this.#coordinatorParseError = undefined;
+    const stepIndex = this.#coordinatorStepIndex;
+    const prompt =
+      stepIndex === 0 && !this.#round1Dispatched
+        ? coordinatorRound1Prompt({
+            problem: debate.topic,
+            coordinatorId: coordinator.id,
+            debateId: debate.id,
+            roundId: round.id,
+            watchers: this.#debateWatchers(),
+            coordinatorProfile: this.#profileForPrompt('anchor'),
+          })
+        : coordinatorActionPrompt({
+            problem: debate.topic,
+            coordinatorId: coordinator.id,
+            debateId: debate.id,
+            roundId: round.id,
+            roundNumber: round.number,
+            watchers: this.#debateWatchers(),
+            evidencePacket: this.#boundedEvidence(),
+            evidenceCatalog: formatEvidenceCatalog(
+              this.#evidenceCatalogForDebate(),
+            ),
+            latestCheckpoint: this.#latestCheckpoint()?.body,
+            coordinatorProfile: this.#profileForPrompt('reinvoke'),
+            stepContext: `Your previous response could not be used (${
+              this.#lastError ?? 'invalid response'
+            }). Re-decide the next Rayzan action for Round ${round.number}.`,
+          });
+    const intent = this.planner.plan(
+      createDispatchPlan({
+        messageId: this.#nextId('msg-coordinator-retry'),
+        debateId: debate.id,
+        senderId: OPERATOR_ID,
+        recipients: { type: 'explicit-agents', agentIds: [coordinator.id] },
+        kind: 'input',
+        body: prompt,
+        referencedMessageIds: this.#recentResponseIds(),
+      }),
+    );
+    this.#dispatchTracked(intent);
+    this.#lastError = undefined;
+    this.#record(
+      `Coordinator re-invoked by Operator retry (Round ${round.number}).`,
+    );
   }
 
   /** Operator authorizes one more shared-evidence round from a checkpoint gate. */

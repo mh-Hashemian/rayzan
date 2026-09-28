@@ -12,6 +12,8 @@ import {
   coordinatorRound2Prompt,
   coordinatorRoundPrompt,
   coordinatorSynthesisPrompt,
+  escapeControlCharsInJsonStrings,
+  unwrapCoordinatorJson,
 } from '../src/coordinator-prompt.js';
 
 const watchers = [createAgent({ id: 'qwen', name: 'Qwen', role: 'watcher' })];
@@ -219,5 +221,62 @@ describe('Coordinator profile prompt composition', () => {
     const b = actionPrompt(profileB);
     assert.ok(a.includes('RISK:') && !a.includes('decision table'));
     assert.ok(b.includes('decision table') && !b.includes('RISK:'));
+  });
+});
+
+describe('Coordinator JSON control-char sanitizer', () => {
+  it('escapes raw newlines inside string values so GLM batches parse', () => {
+    // GLM checkpoint content: Markdown with ## headings and raw newlines
+    // inside the "content" string — JSON.parse rejects it unescaped.
+    const raw = '{"version":1,"commands":[{"type":"checkpoint","content":"## Result\n\nLine one.\nLine two.","recommendation":"FINISH"}]}';
+    assert.throws(() => JSON.parse(raw));
+    const fixed = unwrapCoordinatorJson(raw);
+    const parsed = JSON.parse(fixed) as {
+      commands: { type: string; content: string }[];
+    };
+    assert.equal(parsed.commands[0]!.content, '## Result\n\nLine one.\nLine two.');
+  });
+
+  it('escapes tabs and carriage returns inside strings', () => {
+    const raw = '{"a":"col1\tcol2\r\nrow"}';
+    assert.throws(() => JSON.parse(raw));
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as { a: string };
+    assert.equal(parsed.a, 'col1\tcol2\r\nrow');
+  });
+
+  it('leaves whitespace outside strings untouched', () => {
+    const raw = '{\n  "commands": []\n}';
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as { commands: unknown[] };
+    assert.deepEqual(parsed.commands, []);
+    // Structural newlines survive verbatim.
+    assert.match(unwrapCoordinatorJson(raw), /\n/);
+  });
+
+  it('keeps existing backslash escapes intact', () => {
+    const raw = '{"a":"line\\nbroken \\\\ quoted \\"}"}';
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as { a: string };
+    assert.equal(parsed.a, 'line\nbroken \\ quoted "}');
+  });
+
+  it('escapes other C0 control characters with \\u', () => {
+    const raw = '{"a":"bell\u0007bell"}';
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as { a: string };
+    assert.equal(parsed.a, 'bell\u0007bell');
+  });
+
+  it('is applied by unwrapCoordinatorJson for fenced blocks too', () => {
+    const fenced = '```json\n{"content":"## Heading\nbody"}\n```';
+    const parsed = JSON.parse(unwrapCoordinatorJson(fenced)) as {
+      content: string;
+    };
+    assert.equal(parsed.content, '## Heading\nbody');
+  });
+
+  it('exposes the sanitizer directly for reuse', () => {
+    assert.equal(
+      escapeControlCharsInJsonStrings('{"a":"x\ny"}'),
+      '{"a":"x\\ny"}',
+    );
+    assert.equal(escapeControlCharsInJsonStrings('no strings\nhere\n'), 'no strings\nhere\n');
   });
 });

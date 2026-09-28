@@ -44,6 +44,72 @@ describe('@rayzan/capture evaluate', () => {
     assert.equal(evaluation.phase, 'waiting-for-new-turn');
   });
 
+  it('does not treat a fast unobserved-generation read as terminal (text-before-stop race)', () => {
+    // DeepSeek paints the first streaming chunk before mounting its stop
+    // control; fast polls must not confirm it as a terminal read.
+    const streaming = turn('idx:0', '{"version": 1,');
+    const snapshot: CaptureSnapshot = {
+      identities: [],
+      assistantTurnCount: 0,
+      lastIncomplete: false,
+    };
+    const evaluation = evaluateCapture({
+      snapshot,
+      observation: { turns: [streaming], generating: false },
+      state: {
+        ...initialCaptureState(0),
+        trackedIdentity: 'idx:0',
+        lastText: '{"version": 1,',
+        lastChangeAt: 400,
+      },
+      now: 500,
+    });
+    assert.equal(evaluation.phase, 'generating');
+    assert.equal(evaluation.text, undefined);
+  });
+
+  it('treats a long-quiet unobserved-generation read as the terminal boundary', () => {
+    // Generation ended between polls (stop signal never seen). After the
+    // quiet window the read becomes the terminal boundary, then the normal
+    // confirming read must still happen before capture.
+    const done = turn('idx:0', 'stable answer');
+    const snapshot: CaptureSnapshot = {
+      identities: [],
+      assistantTurnCount: 0,
+      lastIncomplete: false,
+    };
+    const boundary = evaluateCapture({
+      snapshot,
+      observation: { turns: [done], generating: false },
+      state: {
+        ...initialCaptureState(0),
+        trackedIdentity: 'idx:0',
+        lastText: 'stable answer',
+        lastChangeAt: 100,
+      },
+      now: 2_000,
+    });
+    assert.equal(boundary.phase, 'reading-final-response');
+    assert.equal(boundary.generationEndedAt, 2_000);
+
+    const confirmed = evaluateCapture({
+      snapshot,
+      observation: { turns: [done], generating: false },
+      state: {
+        phase: 'reading-final-response',
+        trackedIdentity: 'idx:0',
+        lastText: 'stable answer',
+        lastChangeAt: 100,
+        startedAt: 0,
+        sawGenerating: false,
+        generationEndedAt: 2_000,
+      },
+      now: 2_100,
+    });
+    assert.equal(confirmed.phase, 'captured');
+    assert.equal(confirmed.text, 'stable answer');
+  });
+
   it('confirms the turn across the terminal boundary before capturing', () => {
     const old = turn('idx:0', 'old');
     const next = turn('idx:1', '{"version":1,"commands":[]}');

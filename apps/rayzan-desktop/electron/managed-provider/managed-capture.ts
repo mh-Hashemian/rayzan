@@ -86,6 +86,12 @@ export async function runManagedCapture(input: {
     phase: CaptureEvaluation['phase'],
     evaluation: CaptureEvaluation,
   ) => void;
+  /**
+   * Protocol-shape guard evaluated on a proposed capture. Returning true
+   * rejects the text (e.g. a Coordinator JSON batch still mid-stream) and
+   * keeps the machine observing until the generation watchdog.
+   */
+  readonly rejectCapture?: (text: string) => boolean;
   readonly newTurnWatchdogMs?: number;
   readonly generationWatchdogMs?: number;
 }): Promise<ManagedCaptureResult> {
@@ -95,6 +101,54 @@ export async function runManagedCapture(input: {
   let lastPhase = state.phase;
   let textAtGenerationEnd: CaptureTextFingerprint | undefined;
   let settledRead: ManagedCaptureSettledRead | undefined;
+  // Terminal guard for the propose → settled-confirm → not-confirmed cycle:
+  // if the same text keeps proposing capture but the settled read never
+  // confirms it, the page is in a transient render loop and no amount of
+  // further observation will fix it — fail with a reason instead of
+  // spinning forever and blocking the per-agent work loop. A confirmed
+  // capture (or a different text) resets the tracker.
+  let unconfirmedProposal: { text: string; firstAt: number } | undefined;
+  const UNCONFIRMED_LIMIT_MS = 30_000;
+  const noteProposal = (text: string): void => {
+    if (
+      unconfirmedProposal === undefined ||
+      unconfirmedProposal.text !== text
+    ) {
+      unconfirmedProposal = { text, firstAt: Date.now() };
+      return;
+    }
+    if (Date.now() - unconfirmedProposal.firstAt >= UNCONFIRMED_LIMIT_MS) {
+      throw new CaptureError(
+        'generation-timeout',
+        `captured text (${text.length} chars) never confirmed by the settled page read within ${UNCONFIRMED_LIMIT_MS}ms`,
+      );
+    }
+  };
+  const confirmProposal = (): void => {
+    unconfirmedProposal = undefined;
+  };
+  // Symmetric bounded guard for the rejectCapture path: if a Coordinator JSON
+  // batch is classified as truncated on every observation, noteProposal is
+  // never reached (it lives in the settle branch), so the reject branch would
+  // otherwise spin forever. Track repeated rejections of the same text and
+  // fail with the head visible in the error.
+  let rejectedProposal: { text: string; firstAt: number } | undefined;
+  const REJECT_LIMIT_MS = 30_000;
+  const noteRejection = (text: string): void => {
+    if (rejectedProposal === undefined || rejectedProposal.text !== text) {
+      rejectedProposal = { text, firstAt: Date.now() };
+      return;
+    }
+    if (Date.now() - rejectedProposal.firstAt >= REJECT_LIMIT_MS) {
+      throw new CaptureError(
+        'generation-timeout',
+        `rejected capture (${text.length} chars, head: ${JSON.stringify(text.slice(0, 120))}) stayed unclassifiable as a Coordinator batch within ${REJECT_LIMIT_MS}ms`,
+      );
+    }
+  };
+  const confirmRejection = (): void => {
+    rejectedProposal = undefined;
+  };
   transitions.push({ phase: state.phase, at: started });
 
   const record = (
@@ -156,11 +210,36 @@ export async function runManagedCapture(input: {
         if (!evaluation.text || evaluation.text.length === 0) {
           throw new CaptureError('empty-response');
         }
+        // Protocol-shape guard: a Coordinator JSON batch captured mid-stream
+        // must not become a RESPONSE_CAPTURED event. Only applies while the
+        // stream is still active — once generation has ended the batch is
+        // final, so a non-parsing shape is a protocol problem for the
+        // coordinator parser, not a reason to keep waiting. The bounded
+        // guard below fails the delivery if a mid-stream batch stays
+        // unclassifiable, so this can never spin forever.
+        if (
+          state.generationEndedAt === undefined &&
+          input.rejectCapture?.(evaluation.text) === true
+        ) {
+          noteRejection(evaluation.text);
+          state = {
+            phase: 'generating',
+            trackedIdentity: evaluation.tracked?.identity,
+            lastText: evaluation.text,
+            lastChangeAt: Date.now(),
+            startedAt: state.startedAt,
+            sawGenerating: evaluation.sawGenerating,
+            generationStartedAt: evaluation.generationStartedAt,
+            generationEndedAt: undefined,
+          };
+          continue;
+        }
         // Confirm the captured text against a settled page read: the final
         // DOM commit may land after the terminal signal. If the settled read
         // differs, keep observing — the machine will re-propose capture once
         // the newer text is confirmed.
         if (input.settleObserve !== undefined) {
+          noteProposal(evaluation.text);
           const settled = await input.settleObserve();
           const settledEvaluation = evaluateCapture({
             snapshot: input.beforeSend,
@@ -187,12 +266,15 @@ export async function runManagedCapture(input: {
                 evaluation.text,
             ),
           };
-          record(settledEvaluation, state);          if (
+          record(settledEvaluation, state);
+          if (
             settledEvaluation.phase === 'captured' &&
             settledEvaluation.text !== undefined &&
             settledEvaluation.text !== evaluation.text
           ) {
             // Newer final text confirmed — loop continues with it.
+            confirmProposal();
+            confirmRejection();
             state = {
               phase: settledEvaluation.phase,
               trackedIdentity: settledEvaluation.tracked?.identity,
@@ -224,6 +306,8 @@ export async function runManagedCapture(input: {
             continue;
           }
         }
+        confirmProposal();
+        confirmRejection();
         return {
           text: evaluation.text,
           debug: {

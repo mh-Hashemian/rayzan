@@ -36,6 +36,7 @@ export class ManagedProviderManager {
   readonly #activeAgents = new Map<string, ManagedProviderId>();
   readonly #watchTimers = new Map<ManagedProviderId, NodeJS.Timeout>();
   readonly #captureFailures = new Map<string, number>();
+  readonly #sendFailures = new Map<string, number>();
   readonly #providerReady = new Map<
     ManagedProviderId,
     { readonly promise: Promise<void>; resolve: () => void }
@@ -596,6 +597,28 @@ export class ManagedProviderManager {
       `/api/deliveries/pending?agentId=${encodeURIComponent(agentId)}`,
     );
     if (pending.job !== null) {
+      // Send retry ceiling: a send that keeps throwing (e.g. Qwen silently
+      // ignoring the submit) never gets acked, so the delivery stays pending
+      // and this branch re-runs it every loop tick — faster than the old
+      // capture-resume loop. Stop after a few attempts and surface Operator
+      // attention instead.
+      const sendAttempts =
+        this.#sendFailures.get(pending.job.deliveryId) ?? 0;
+      const SEND_LIMIT = 3;
+      if (sendAttempts >= SEND_LIMIT) {
+        await this.#notePresence(
+          agentId,
+          providerId,
+          'attention',
+          `send failed ${sendAttempts} times for ${pending.job.deliveryId} — retry ceiling reached; Operator recovery required`,
+          {
+            deliveryId: pending.job.deliveryId,
+            phase: 'failed',
+            reason: 'send-limit-reached',
+          },
+        );
+        return;
+      }
       await this.#deliverAndCapture(agentId, providerId, pending.job);
       return;
     }
@@ -604,6 +627,26 @@ export class ManagedProviderManager {
       `/api/deliveries/awaiting?agentId=${encodeURIComponent(agentId)}`,
     );
     if (awaiting.job !== null && awaiting.job.capture !== false) {
+      // Retry ceiling: a delivery whose capture keeps failing (e.g. a send
+      // that never landed, so no turn ever appears) must stop resuming after
+      // a few attempts — otherwise #processAgent re-runs it every ~90s
+      // forever and the agent never reports recoverable attention.
+      const attempts = (this.#captureFailures.get(awaiting.job.deliveryId) ?? 0);
+      const RESUME_LIMIT = 3;
+      if (attempts >= RESUME_LIMIT) {
+        await this.#notePresence(
+          agentId,
+          providerId,
+          'attention',
+          `capture failed ${attempts} times for ${awaiting.job.deliveryId} — retry ceiling reached; Operator recovery required`,
+          {
+            deliveryId: awaiting.job.deliveryId,
+            phase: 'failed',
+            reason: 'resume-limit-reached',
+          },
+        );
+        return;
+      }
       await this.#resumeCapture(agentId, providerId, awaiting.job);
       return;
     }
@@ -655,12 +698,14 @@ export class ManagedProviderManager {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      this.#sendFailures.set(job.deliveryId, (this.#sendFailures.get(job.deliveryId) ?? 0) + 1);
       this.#debug.noteError(providerId, `send failed: ${message}`);
       throw error;
     }
     mark('sendMessageReturned');
     noteGenerating();
     await this.#ackDelivery(agentId, job.deliveryId);
+    this.#sendFailures.delete(job.deliveryId);
     mark('ackDelivery');
     if (job.capture === false) {
       await this.#notePresence(agentId, providerId, 'waiting');
@@ -789,9 +834,15 @@ export class ManagedProviderManager {
     this.#debug.setCaptureActive(providerId, true);
     try {
       await this.#notePresence(agentId, providerId, 'generating');
+      const expectJson = jobExpectsJsonDispatch(job.body);
       const text = await this.#browser.captureResponse(providerId, beforeSend, {
         deliveryId: job.deliveryId,
         lastDebug: debugBox,
+        ...(expectJson
+          ? {
+              rejectCapture: (text) => looksLikeTruncatedJsonBatch(text),
+            }
+          : {}),
         onPhase: (phase) => {
           lastPhase = phase;
           void this.#notePresence(agentId, providerId, phase).catch(
@@ -1037,6 +1088,29 @@ function jobExpectsJsonDispatch(body: string): boolean {
     /Reply with JSON only/i.test(instruction) &&
     /"commands"\s*:/.test(instruction)
   );
+}
+
+/**
+ * True when the text starts a Coordinator JSON command batch but does not yet
+ * parse — i.e. the capture raced the stream. A cleanly-parsing object with a
+ * different shape is NOT truncated: the coordinator's
+ * parseCoordinatorCommandBatch owns shape validation downstream, and blocking
+ * capture on shape here would stall forever on a finished response.
+ */
+function looksLikeTruncatedJsonBatch(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{')) {
+    return false;
+  }
+  try {
+    JSON.parse(trimmed);
+    // Parses cleanly → not truncated. If it's the wrong shape, the parser
+    // downstream will report that as a parse failure, not a capture stall.
+    return false;
+  } catch {
+    // Doesn't parse. Still streaming OR genuinely malformed.
+    return true;
+  }
 }
 
 function delay(ms: number): Promise<void> {

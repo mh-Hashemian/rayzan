@@ -72,6 +72,14 @@ export const NEW_TURN_WATCHDOG_MS = 90_000;
 /** Watchdog only — not a completion heuristic. */
 export const GENERATION_WATCHDOG_MS = 180_000;
 
+/**
+ * Quiet window required before trusting a terminal transition that was never
+ * preceded by an observed generating state (text-before-stop-button race).
+ * Streaming renderers can hold the same innerText across ~100ms polls, but a
+ * finished turn stays unchanged for far longer.
+ */
+export const UNOBSERVED_QUIET_MS = 1_500;
+
 /** @deprecated Use NEW_TURN_WATCHDOG_MS. */
 export const NEW_TURN_TIMEOUT_MS = NEW_TURN_WATCHDOG_MS;
 /** @deprecated Use GENERATION_WATCHDOG_MS. */

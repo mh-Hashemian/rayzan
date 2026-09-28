@@ -178,7 +178,7 @@ describe('capture state machine', () => {
     assert.equal(evaluation.phase, 'generating');
   });
 
-  it('captures immediately when generation ends (no stability timer)', () => {
+  it('confirms across the terminal boundary when generation ends (no stability timer)', () => {
     const almost = turnFrom('<div>final!</div>', {
       identity: 'idx:0',
       finalText: 'final!',
@@ -188,7 +188,8 @@ describe('capture state machine', () => {
       assistantTurnCount: 0,
       lastIncomplete: false,
     };
-    const evaluation = evaluateCapture({
+    // Terminal observed: not captured until a confirming read.
+    const terminal = evaluateCapture({
       snapshot,
       observation: { turns: [almost], generating: false },
       state: {
@@ -200,8 +201,26 @@ describe('capture state machine', () => {
       },
       now: 500,
     });
-    assert.equal(evaluation.phase, 'captured');
-    assert.equal(evaluation.text, 'final!');
+    assert.equal(terminal.phase, 'reading-final-response');
+    assert.equal(terminal.text, undefined);
+
+    // Confirming observation with the same text: captured.
+    const confirmed = evaluateCapture({
+      snapshot,
+      observation: { turns: [almost], generating: false },
+      state: {
+        phase: 'reading-final-response',
+        trackedIdentity: 'idx:0',
+        lastText: 'final!',
+        lastChangeAt: 500,
+        startedAt: 0,
+        sawGenerating: true,
+        generationEndedAt: 500,
+      },
+      now: 600,
+    });
+    assert.equal(confirmed.phase, 'captured');
+    assert.equal(confirmed.text, 'final!');
   });
 
   it('submits exactly once after generation ends', async () => {
@@ -295,12 +314,14 @@ describe('capture state machine', () => {
         trackedIdentity: 'idx:1',
         lastText: 'fresh coordinator brief',
         lastChangeAt: 0,
+        sawGenerating: true,
       },
       now: 2500,
       stabilityWindowMs: 2000,
     });
-    assert.equal(evaluation.phase, 'captured');
-    assert.equal(evaluation.text, 'fresh coordinator brief');
+    // Terminal boundary observed; capture waits for the confirming read.
+    assert.equal(evaluation.phase, 'reading-final-response');
+    assert.equal(evaluation.lastText, 'fresh coordinator brief');
   });
 
   it('fails with tracked-turn-disappeared when the identity is gone and nothing new is generating', () => {
@@ -356,6 +377,7 @@ describe('capture state machine', () => {
       assistantTurnCount: 0,
       lastIncomplete: false,
     };
+    // Terminal boundary with the partial text: enters the confirm stage.
     const early = evaluateCapture({
       snapshot,
       observation: { turns: [partial], generating: false },
@@ -368,7 +390,25 @@ describe('capture state machine', () => {
       },
       now: 5_000,
     });
-    assert.equal(early.phase, 'captured');
-    assert.equal(early.text, '{');
+    assert.equal(early.phase, 'reading-final-response');
+
+    // Unchanged partial text across the boundary: captured as-is. JSON shape
+    // is protocol validation AFTER RESPONSE_CAPTURED, not capture's job.
+    const confirmed = evaluateCapture({
+      snapshot,
+      observation: { turns: [partial], generating: false },
+      state: {
+        phase: 'reading-final-response',
+        trackedIdentity: 'idx:1',
+        lastText: '{',
+        lastChangeAt: 5_000,
+        startedAt: 0,
+        sawGenerating: true,
+        generationEndedAt: 5_000,
+      },
+      now: 5_100,
+    });
+    assert.equal(confirmed.phase, 'captured');
+    assert.equal(confirmed.text, '{');
   });
 });

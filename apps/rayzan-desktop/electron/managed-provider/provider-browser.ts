@@ -843,6 +843,8 @@ export class ProviderBrowserHost {
       readonly onPhase?: (phase: string) => void;
       readonly onEvaluation?: (evaluation: CaptureEvaluation) => void;
       readonly lastDebug?: { current?: ManagedCaptureDebug };
+      /** Reject a proposed capture; the machine keeps observing. */
+      readonly rejectCapture?: (text: string) => boolean;
     },
   ): Promise<string> {
     await this.wakeForWork(id);
@@ -867,6 +869,9 @@ export class ProviderBrowserHost {
         observe: () => this.observe(id),
         waitForDomChange: (ms) => this.waitForDomChange(id, ms),
         settleObserve: () => this.settledObservation(id),
+        ...(options?.rejectCapture
+          ? { rejectCapture: options.rejectCapture }
+          : {}),
         onPhase: (phase, evaluation) => {
           options?.onEvaluation?.(evaluation);
           options?.onPhase?.(presenceFromCapturePhase(phase));

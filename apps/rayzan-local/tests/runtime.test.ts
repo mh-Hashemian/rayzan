@@ -350,7 +350,7 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     assert.notEqual(briefs.at(-1)!.id, 'round1-brief');
   });
 
-  it('retryCoordinatorDispatch fails closed on bad stored Coordinator JSON', () => {
+  it('retryCoordinatorDispatch re-invokes the Coordinator after a bad response', () => {
     const runtime = new RayzanRuntime();
     const { coordinator, qwen } = registerTrio(runtime);
     runtime.runLiveRound1('Need retry after bad JSON');
@@ -361,8 +361,24 @@ describe('live Round 1 → Coordinator → personalized Round 2', () => {
     assert.ok(runtime.snapshot().lastError);
     assert.equal(runtime.snapshot().canRetryCoordinatorDispatch, true);
     assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
-    assert.throws(() => runtime.retryCoordinatorDispatch(), /.+/);
-    assert.equal(runtime.nextPendingForAgent(qwen.id), undefined);
+
+    // Retry re-prompts the Coordinator instead of re-parsing stale text.
+    runtime.retryCoordinatorDispatch();
+    assert.equal(runtime.snapshot().lastError, undefined);
+    const retried = runtime.nextPendingForAgent(coordinator.id);
+    assert.ok(retried);
+    assert.match(retried.body, /Consultation Round 1/);
+
+    // The new response parses and dispatches the Round 1 brief.
+    submitRound1CoordinatorBrief(
+      runtime,
+      coordinator.id,
+      runtime.snapshot().debate!.id,
+      runtime.snapshot().round1!.id,
+      'Retry recovered brief.',
+    );
+    assert.ok(runtime.nextPendingForAgent(qwen.id));
+    assert.equal(runtime.snapshot().lastError, undefined);
   });
 
   it('does not send Round 2 evidence when only one Watcher has responded', () => {
