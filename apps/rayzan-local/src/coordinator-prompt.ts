@@ -358,12 +358,20 @@ ${input.evidencePacket}`;
  * so JSON.parse rejects an otherwise complete batch. Escape them — but only
  * inside string literals, where they are illegal; outside strings they are
  * legal whitespace and must stay untouched.
+ *
+ * Also repairs unescaped inner quotes (the model writes `the word "season"`
+ * inside a string value). Disambiguation is the standard LLM-JSON-repair
+ * heuristic: a `"` while inside a string is the legitimate close only when
+ * the next non-whitespace character is a structural token (`,`, `}`, `]`,
+ * `:`) or end of input; otherwise it is string content and gets escaped.
  */
 export function escapeControlCharsInJsonStrings(text: string): string {
   let out = '';
   let inString = false;
   let escaped = false;
-  for (const ch of text) {
+  const chars = [...text];
+  for (let i = 0; i < chars.length; i += 1) {
+    const ch = chars[i]!;
     if (!inString) {
       if (ch === '"') {
         inString = true;
@@ -383,8 +391,20 @@ export function escapeControlCharsInJsonStrings(text: string): string {
       continue;
     }
     if (ch === '"') {
-      inString = false;
-      out += ch;
+      // Quote while inside a string: decide whether it closes the string or
+      // is unescaped content. Structural next token (or end of input) means
+      // close; anything else means content — escape it and stay in-string.
+      let j = i + 1;
+      while (j < chars.length && /\s/.test(chars[j]!)) {
+        j += 1;
+      }
+      const next = j < chars.length ? chars[j]! : '';
+      if (next === ',' || next === '}' || next === ']' || next === ':') {
+        inString = false;
+        out += ch;
+      } else {
+        out += '\\"';
+      }
       continue;
     }
     const code = ch.codePointAt(0) ?? 0;
@@ -428,6 +448,14 @@ export function looksLikeTruncatedCoordinatorJson(text: string): boolean {
     JSON.parse(unwrapCoordinatorJson(trimmed));
     return false;
   } catch {
+    // A batch whose closing brace is present is a complete document that
+    // failed to parse — malformed, not truncated. Only a missing closing
+    // brace indicates the capture raced the stream; anything else must let
+    // the parser error propagate with its real message so the Operator is
+    // not sent down the wrong recovery path.
+    if (trimmed.trimEnd().endsWith('}')) {
+      return false;
+    }
     return /"commands"\s*:/.test(trimmed) || /"version"\s*:/.test(trimmed);
   }
 }

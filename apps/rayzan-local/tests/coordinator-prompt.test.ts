@@ -13,6 +13,7 @@ import {
   coordinatorRoundPrompt,
   coordinatorSynthesisPrompt,
   escapeControlCharsInJsonStrings,
+  looksLikeTruncatedCoordinatorJson,
   unwrapCoordinatorJson,
 } from '../src/coordinator-prompt.js';
 
@@ -278,5 +279,111 @@ describe('Coordinator JSON control-char sanitizer', () => {
       '{"a":"x\\ny"}',
     );
     assert.equal(escapeControlCharsInJsonStrings('no strings\nhere\n'), 'no strings\nhere\n');
+  });
+
+  it('escapes unescaped inner quotes so quoted words inside values parse', () => {
+    // The exact Round-2 failure: GLM writes quoted words inside a string
+    // value; JSON.parse rejects the whole batch.
+    const raw = '{"body":"word "season" or "sunshine""}';
+    assert.throws(() => JSON.parse(raw));
+    const sanitized = unwrapCoordinatorJson(raw);
+    const parsed = JSON.parse(sanitized) as { body: string };
+    assert.equal(parsed.body, 'word "season" or "sunshine"');
+  });
+
+  it('repairs the full GLM dispatch command with inner quotes', () => {
+    const raw =
+      '{"version":1,"commands":[{"type":"dispatch","recipients":{"type":"explicit-agents","agentIds":["qwen"]},"body":"... the exact word "season" or the exact word "sunshine" ..."}]}';
+    assert.throws(() => JSON.parse(raw));
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as {
+      version: number;
+      commands: { type: string; body: string }[];
+    };
+    assert.equal(parsed.version, 1);
+    assert.equal(parsed.commands[0]!.type, 'dispatch');
+    assert.equal(
+      parsed.commands[0]!.body,
+      '... the exact word "season" or the exact word "sunshine" ...',
+    );
+  });
+
+  it('still closes strings followed by structural tokens', () => {
+    // A legitimate close before a comma / colon / brace must stay a close,
+    // and a value after a colon opens a new string.
+    const raw = '{"a":"first","b":"second"}';
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as {
+      a: string;
+      b: string;
+    };
+    assert.equal(parsed.a, 'first');
+    assert.equal(parsed.b, 'second');
+  });
+
+  it('treats a quote before whitespace-then-structural as a close', () => {
+    const raw = '{"a":"value" ,  "b":"next"}';
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as {
+      a: string;
+      b: string;
+    };
+    assert.equal(parsed.a, 'value');
+    assert.equal(parsed.b, 'next');
+  });
+
+  it('keeps pre-escaped inner quotes working', () => {
+    // \" is already legal — the lookahead path must not double-escape it.
+    const raw = '{"a":"the \\"quoted\\" word","b":"next"}';
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as {
+      a: string;
+      b: string;
+    };
+    assert.equal(parsed.a, 'the "quoted" word');
+    assert.equal(parsed.b, 'next');
+  });
+
+  it('escapes a trailing quote before end of input after content', () => {
+    // The FINAL quote before end-of-input is the close (spec rule), so a
+    // well-formed document whose value ends with a quoted word still parses.
+    const raw = '{"body":"say "sunshine""}';
+    assert.throws(() => JSON.parse(raw));
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as { body: string };
+    assert.equal(parsed.body, 'say "sunshine"');
+  });
+
+  it('repairs inner quotes combined with raw newlines', () => {
+    const raw =
+      '{"type":"checkpoint","content":"## Result\n\nAsk for "season" or "sunshine".","recommendation":"FINISH"}';
+    assert.throws(() => JSON.parse(raw));
+    const parsed = JSON.parse(unwrapCoordinatorJson(raw)) as {
+      content: string;
+    };
+    assert.equal(parsed.content, '## Result\n\nAsk for "season" or "sunshine".');
+  });
+});
+
+describe('Coordinator JSON truncation classification', () => {
+  it('does not call a balanced malformed batch truncated', () => {
+    // Ends with } (balanced) but fails to parse — malformed, not truncated.
+    const malformed =
+      '{"version":1,"commands":[{"type":"dispatch","body":"word "season""}]}';
+    assert.equal(looksLikeTruncatedCoordinatorJson(malformed), false);
+  });
+
+  it('classifies a missing closing brace with command markers as truncated', () => {
+    const truncated = '{"version":1,"commands":[{"type":"dispatch"';
+    assert.equal(looksLikeTruncatedCoordinatorJson(truncated), true);
+  });
+
+  it('classifies a mid-stream fragment like debate-257 as truncated', () => {
+    const fragment = '{\n"version": 1,';
+    assert.equal(looksLikeTruncatedCoordinatorJson(fragment), true);
+  });
+
+  it('returns false for a parseable batch', () => {
+    const good = '{"version":1,"commands":[{"type":"checkpoint"}]}';
+    assert.equal(looksLikeTruncatedCoordinatorJson(good), false);
+  });
+
+  it('returns false when there is no JSON at all', () => {
+    assert.equal(looksLikeTruncatedCoordinatorJson('not json'), false);
   });
 });
