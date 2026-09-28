@@ -187,10 +187,12 @@ export function App() {
               onChangeCoordinator={async (agentId) => {
                 const next = await changeCoordinator(agentId);
                 setStatus(next);
+                return next;
               }}
               onSetWatcherParticipation={async (agentId, enabled) => {
                 const next = await setWatcherParticipation(agentId, enabled);
                 setStatus(next);
+                return next;
               }}
               onDecisionStarted={(nextLaunch) => {
                 setLaunch(nextLaunch);

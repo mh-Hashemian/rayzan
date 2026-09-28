@@ -23,7 +23,7 @@ pnpm install --frozen-lockfile
 
 ## 3. (Optional) Bump the version
 
-Both `apps/rayzan-desktop/package.json` and the artifact name use it. Current value is `0.0.0`; the output is named `Rayzan-${version}-win-x64.exe`, so setting e.g. `0.1.0` produces `Rayzan-0.1.0-win-x64.exe`.
+Both `apps/rayzan-desktop/package.json` and the artifact name use it. Current value is `0.0.2`; the output is named `Rayzan-${version}-win-x64.exe`, so setting e.g. `0.1.0` produces `Rayzan-0.1.0-win-x64.exe`.
 
 ## 4. Run the checks (recommended before packaging)
 
@@ -42,8 +42,9 @@ pnpm desktop:dist
 This runs, in order:
 
 1. `scripts/ensure-electron-sqlite.mjs` — rebuilds `better-sqlite3` against the Electron ABI into the isolated `.electron-native/` folder.
-2. `vite build` — bundles the renderer plus the Electron main/preload (esbuild is deliberately kept external; it must load as real CJS from `node_modules`).
-3. `scripts/package-desktop.mjs` — packages asar and produces three targets: `nsis` (installer), `dir` (unpacked), `zip` (portable). Each run uses a fresh output directory, so an open app or file watcher holding a previous `app.asar` cannot block the new package. Non-asar payloads go in via `extraResources`: the local runtime dashboard (`local-public`), the app icon, and `resources/capture` (shared capture sources, read by the send-bundler at runtime). It also runs `scripts/after-pack.cjs`, which copies the Electron-built `better_sqlite3.node` into `app.asar.unpacked`.
+2. `scripts/ensure-esbuild-pack.mjs` — copies `esbuild` and its `@esbuild/win32-<arch>` binary, version-checked against each other, into `.electron-native/esbuild-pack/node_modules/`, so packaging ships them as real files (see below).
+3. `vite build` — bundles the renderer plus the Electron main/preload (esbuild is deliberately kept external; it must load as real code from a `node_modules` folder, never from inside the archive).
+4. `scripts/package-desktop.mjs` — packages asar and produces three targets: `nsis` (installer), `dir` (unpacked), `zip` (portable). Each run uses a fresh output directory, so an open app or file watcher holding a previous `app.asar` cannot block the new package. Non-asar payloads go in via `extraResources`: the local runtime dashboard (`local-public`), the app icon, `resources/capture` (shared capture sources, read by the send-bundler at runtime) and **`resources/node_modules/{esbuild,@esbuild/win32-x64}`** — esbuild stays out of `app.asar` on purpose, because it locates its native binary with `require.resolve`, and an `app.asar/...` executable path cannot be spawned. It also runs `scripts/after-pack.cjs`, which copies the Electron-built `better_sqlite3.node` into `app.asar.unpacked`.
 
 Artifacts land in a timestamped folder inside `apps/rayzan-desktop/release/` (git-ignored). The command prints its exact path:
 
@@ -76,6 +77,7 @@ Confirmed on the 0.0.0 build: both `Rayzan.exe` and the installer report `Produc
 2. Verify the Start-menu entry, desktop shortcut, and taskbar icon all show the Rayzan logo. If Explorer still shows the old Electron icon for a rebuilt exe at the same path, it is the Windows icon cache — run `ie4uinit.exe -show` or restart Explorer.
 3. Launch, wait for **Ready** in the top bar.
 4. Run one small decision end-to-end (see the tester checklist in TESTER-HANDOFF.md).
+5. Send one message through a managed ChatGPT provider. The first send is what executes the capture send-bundler through esbuild, so it is the only step that proves `resources\node_modules\@esbuild\win32-x64\esbuild.exe` resolves from outside the archive.
 
 App data lives at `%APPDATA%\Rayzan\rayzan.sqlite`; delete it to reset history between tests.
 
@@ -94,6 +96,7 @@ Output is in `apps/browser-extension/dist/`. Zip that folder as `Rayzan-Bridge-<
 | Installed app shows the default Electron logo | `signAndEditExecutable` was flipped back to `false`, or Explorer icon cache — see section 6/7. |
 | `Packaged Electron better-sqlite3 missing isolated binary` during `dist` | Rebuild step didn't run or failed: `pnpm --filter @rayzan/desktop rebuild-native`, then `pnpm desktop:dist`. |
 | `__filename is not defined` on first ChatGPT send (packaged app) | esbuild got bundled into the ESM main bundle again; `vite.config.ts` must keep `esbuild` in `rollupOptions.external`. |
+| `spawn ...\resources\app.asar\node_modules\@esbuild\win32-x64\esbuild.exe ENOENT` on first ChatGPT send (packaged app) | esbuild was archived inside `app.asar` again, so its `require.resolve` binary lookup points into the archive instead of `resources\node_modules\@esbuild\win32-x64\esbuild.exe`. The binary being *unpacked* next to the archive does not help — esbuild never rewrites the path. Keep the `!node_modules/esbuild/**` / `!node_modules/@esbuild/**` entries in `build.files` and the two `extraResources` entries from `ensure-esbuild-pack.mjs`, then re-run `pnpm desktop:dist`. |
 | Installer build fails downloading Electron | Clear proxy/VPN and retry; the cache lives in `%LOCALAPPDATA%\electron\Cache`. |
 | `app.asar ... being used by another process` when packaging starts | The packaging target was reused while Rayzan or another process held its `app.asar` open. Use `pnpm desktop:dist`, which now creates a fresh output folder for every run. Close any app launched from that specific folder before removing it. |
 | `<repo>\packages\capture\package.json must be under <repo>\apps\rayzan-desktop` | electron-builder refuses to pack a symlinked workspace package that resolves outside the app folder. `@rayzan/capture` is therefore a **dev**Dependency (rollup inlines it into `dist-electron/main.js`) and its source ships as real files through `extraResources` to `resources/capture`; `chatgpt-send-bundle.ts` reads that folder when `app.isPackaged`. Keep it out of `dependencies` — esbuild's native binary cannot read `.ts` sources from inside `app.asar` anyway. |

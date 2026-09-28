@@ -6,7 +6,7 @@ import {
   COORDINATOR_PROFILE_MAX_CHARS,
   RayzanRuntime,
 } from './runtime.js';
-import { desktopStatus } from './status.js';
+import { desktopStatus, type TeamAgentView } from './status.js';
 import { attachEventStream } from './event-stream.js';
 
 export interface BridgeContext {
@@ -163,6 +163,7 @@ export async function handleBridgeRequest(
       url.pathname === '/api/session/create-round'
     ) {
       const body = await readJson(request);
+      assertStartableTeam(runtime, context);
       runtime.createRound1(String(body.problem ?? ''));
       write(response, 200, runtime.snapshot());
       return true;
@@ -172,6 +173,7 @@ export async function handleBridgeRequest(
       url.pathname === '/api/session/run-live-round'
     ) {
       const body = await readJson(request);
+      assertStartableTeam(runtime, context);
       runtime.runLiveRound1(String(body.problem ?? ''));
       write(response, 200, runtime.snapshot());
       return true;
@@ -181,6 +183,7 @@ export async function handleBridgeRequest(
       url.pathname === '/api/session/start-round'
     ) {
       const body = await readJson(request);
+      assertStartableTeam(runtime, context);
       runtime.runLiveRound1(String(body.problem ?? ''));
       write(response, 200, runtime.snapshot());
       return true;
@@ -313,6 +316,52 @@ export async function handleBridgeRequest(
     write(response, 400, { error: message });
     return true;
   }
+}
+
+/**
+ * Server-side gate for starting a debate. The desktop UI disables Start for the
+ * same conditions, but the HTTP routes are reachable directly, so the team is
+ * re-checked here against live binding state. Resuming an existing debate is
+ * left to the runtime's own guards.
+ */
+function assertStartableTeam(
+  runtime: RayzanRuntime,
+  context: BridgeContext,
+): void {
+  const status = desktopStatus(runtime, context);
+  if (status.activeDebate !== null) {
+    return;
+  }
+  const coordinators = status.team.filter(
+    (agent) => agent.role === 'coordinator',
+  );
+  if (coordinators.length !== 1) {
+    throw new Error('register exactly one Coordinator before starting a debate');
+  }
+  assertReachable(coordinators[0]!);
+  const watchers = status.team.filter(
+    (agent) => agent.role === 'watcher' && agent.enabled,
+  );
+  if (watchers.length === 0) {
+    throw new Error('include at least one Watcher in the next debate');
+  }
+  for (const watcher of watchers) {
+    assertReachable(watcher);
+  }
+}
+
+/**
+ * A provider-managed agent only reaches its model through a live browser
+ * binding. Agents without a provider are plain HTTP pollers, which the runtime
+ * serves without any binding, so they stay startable.
+ */
+function assertReachable(agent: TeamAgentView): void {
+  if (agent.provider === undefined || agent.connection === 'connected') {
+    return;
+  }
+  throw new Error(
+    `${agent.name} is not connected. Reconnect it in Settings → AI Providers before starting a decision.`,
+  );
 }
 
 async function readJson(

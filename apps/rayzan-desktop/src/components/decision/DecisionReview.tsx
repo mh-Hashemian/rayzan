@@ -2,32 +2,28 @@ import { useState } from 'react';
 
 import type { AgentView } from '../../api.js';
 import type { DecisionDraft } from './types.js';
-
-/** Runtime requires at least one included Watcher for the live path. */
-export const REQUIRED_WATCHERS = 1;
+import {
+  draftedCoordinator,
+  draftedWatchers,
+  validateTeamDraft,
+  type TeamDraft,
+} from './team.js';
 
 export function DecisionReview(input: {
   readonly draft: DecisionDraft;
   readonly team: readonly AgentView[];
+  readonly teamDraft: TeamDraft;
   readonly onBack: () => void;
   readonly onStart: () => Promise<void>;
 }) {
-  const coordinator = input.team.find(
-    (agent) => agent.role === 'coordinator' && agent.connection === 'connected',
-  );
-  const watchers = input.team.filter(
-    (agent) =>
-      agent.role === 'watcher' &&
-      agent.enabled &&
-      agent.connection === 'connected',
-  );
+  const coordinator = draftedCoordinator(input.teamDraft, input.team);
+  const watchers = draftedWatchers(input.teamDraft, input.team);
+  const readiness = validateTeamDraft(input.teamDraft, input.team);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
   const questionOk = input.draft.question.trim().length > 0;
-  const coordinatorOk = coordinator !== undefined;
-  const watchersOk = watchers.length >= REQUIRED_WATCHERS;
-  const canStart = questionOk && coordinatorOk && watchersOk && !busy;
+  const canStart = questionOk && readiness.canStart && !busy;
 
   async function start() {
     if (!canStart) {
@@ -70,7 +66,7 @@ export function DecisionReview(input: {
       <div className="review-card">
         <h2>AI Team</h2>
         <h3>Coordinator</h3>
-        <p className="review-copy">{coordinator?.name ?? 'None available'}</p>
+        <p className="review-copy">{coordinator?.name ?? 'None selected'}</p>
         <h3>Watchers</h3>
         {watchers.length === 0 ? (
           <p className="review-copy">None included</p>
@@ -81,11 +77,9 @@ export function DecisionReview(input: {
             ))}
           </ul>
         )}
-        {!watchersOk ? (
-          <p className="wizard-inline-note">
-            Include at least {REQUIRED_WATCHERS} connected Watchers to start.
-          </p>
-        ) : null}
+        <p className="wizard-inline-note">
+          This is the exact team the Decision will be started with.
+        </p>
       </div>
 
       <div className="review-card">
@@ -105,6 +99,10 @@ export function DecisionReview(input: {
           </li>
         </ol>
       </div>
+
+      {!readiness.canStart ? (
+        <p className="wizard-inline-note">{readiness.message}</p>
+      ) : null}
 
       {error !== undefined ? (
         <div className="error-panel">

@@ -1,6 +1,6 @@
 {
   "name": "@rayzan/desktop",
-  "version": "0.0.0",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
@@ -9,10 +9,10 @@
   "scripts": {
     "dev": "node scripts/ensure-electron-sqlite.mjs && vite",
     "build": "node scripts/ensure-electron-sqlite.mjs && vite build",
-    "dist": "node scripts/ensure-electron-sqlite.mjs && vite build && node scripts/package-desktop.mjs",
+    "dist": "node scripts/ensure-electron-sqlite.mjs && node scripts/ensure-esbuild-pack.mjs && vite build && node scripts/package-desktop.mjs",
     "rebuild-native": "node scripts/ensure-electron-sqlite.mjs --force",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "tsx --test tests/managed-provider.test.ts tests/derive.test.ts tests/markdown.test.tsx"
+    "test": "tsx --test tests/managed-provider.test.ts tests/derive.test.ts tests/markdown.test.tsx tests/team.test.tsx"
   },
   "dependencies": {
     "better-sqlite3": "12.11.1",
@@ -55,29 +55,23 @@
           "**/*"
         ]
       },
-      {
-        "from": "node_modules/esbuild",
-        "to": "node_modules/esbuild",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "node_modules/@esbuild",
-        "to": "node_modules/@esbuild",
-        "filter": [
-          "**/*"
-        ]
-      }
+      "!node_modules/esbuild/**",
+      "!node_modules/@esbuild/**"
     ],
     "asar": true,
     "asarUnpack": [
       "**/*.node",
-      "node_modules/better-sqlite3/**",
-      "node_modules/esbuild/**",
-      "node_modules/@esbuild/**"
+      "node_modules/better-sqlite3/**"
     ],
     "extraResources": [
+      {
+        "from": ".electron-native/esbuild-pack/node_modules/esbuild",
+        "to": "node_modules/esbuild"
+      },
+      {
+        "from": ".electron-native/esbuild-pack/node_modules/@esbuild/win32-x64",
+        "to": "node_modules/@esbuild/win32-x64"
+      },
       {
         "from": "../rayzan-local/public",
         "to": "local-public"

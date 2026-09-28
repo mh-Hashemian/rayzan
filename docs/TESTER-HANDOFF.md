@@ -2,8 +2,8 @@
 
 ## What to share
 
-- `Rayzan-0.0.0-win-x64.exe` — preferred Windows x64 installer.
-- `Rayzan-0.0.0-win-x64.zip` — portable fallback. Extract it completely, then run `Rayzan.exe` from the extracted folder.
+- `Rayzan-0.0.2-win-x64.exe` — preferred Windows x64 installer.
+- `Rayzan-0.0.2-win-x64.zip` — portable fallback. Extract it completely, then run `Rayzan.exe` from the extracted folder.
 - `Rayzan-Bridge-0.0.0.zip` — separately loadable browser extension for Chrome or Edge.
 
 The desktop app and extension are local-first. No Node.js, pnpm, or source checkout is required for a tester.
