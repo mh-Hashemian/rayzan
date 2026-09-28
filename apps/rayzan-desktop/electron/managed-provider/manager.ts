@@ -971,11 +971,16 @@ export class ManagedProviderManager {
     }
     if (evaluation.phase === 'captured') {
       debug.setGeneration(providerId, 'ended');
-      debug.transition(
-        providerId,
-        'capture-captured',
-        `${evaluation.text?.length ?? 0} chars`,
-      );
+      // Temporary GLM extraction diagnostics: the tier lengths before
+      // normalization tell us which tier captured and whether the walk ran
+      // before all shadow-tree children committed (compare against the
+      // on-screen answer length on a suspected early-cut). Remove with
+      // __rayzanDebug.
+      const turnDebug = evaluation.tracked?.__rayzanDebug;
+      const detail = turnDebug
+        ? `${evaluation.text?.length ?? 0} chars t1=${turnDebug.t1Len ?? '-'} t2=${turnDebug.t2Len ?? '-'} t3=${turnDebug.t3Len ?? '-'} raw=${turnDebug.rawLen ?? '-'}`
+        : `${evaluation.text?.length ?? 0} chars`;
+      debug.transition(providerId, 'capture-captured', detail);
       return;
     }
     if (evaluation.phase === 'failed') {

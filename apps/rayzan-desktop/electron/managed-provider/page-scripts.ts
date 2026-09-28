@@ -811,7 +811,7 @@ export const glmPageScript = `
             }
             return out;
           };
-          text = walk(el).replace(/\s+/g, ' ').trim();
+          text = walk(el).replace(/\\s+/g, ' ').trim();
           t3Len = text.length;
         }
         let rawLen = 0;

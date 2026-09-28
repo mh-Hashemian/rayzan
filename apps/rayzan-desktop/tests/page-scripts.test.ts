@@ -529,6 +529,33 @@ describe('managed page scripts', () => {
     assert.equal(debug.shadowRootDepth, 1);
   });
 
+  it('GLM: tier-3 walk preserves s characters (template-literal escape regression)', () => {
+    // The walk's whitespace normalization lives in a backtick template
+    // literal; an unescaped \s there becomes literal 's' in the injected
+    // code, deleting every s from the captured answer. This stub proves
+    // s-characters survive the full walk + normalization.
+    const document = makeDocument();
+    const api = loadPageScript(glmPageScript, document);
+
+    const turn = el(document, { className: 'chat-assistant' });
+    const shadow = el(document, {});
+    shadow.nodeType = 11;
+    const answer = el(document, { className: 'answer', tag: 'p' });
+    answer.textContent = 'The season is autumn, the sky stays vast.';
+    answer.withTextNode();
+    shadow.appendChild(answer);
+    turn.shadowRoot = shadow;
+    document.body.appendChild(turn);
+
+    const snap = api.snapshot();
+    const turn0 = snap.turns[0]!;
+    // "season" must survive with every s intact.
+    assert.ok(turn0.finalText.includes('season'), 's characters must survive');
+    assert.equal(turn0.finalText, 'The season is autumn, the sky stays vast.');
+    assert.equal(turn0.hasFinalAnswer, true);
+    assert.equal(turn0.thinkingOnly, false);
+  });
+
   it('Qwen: sendPrompt throws when the submit never takes effect', async () => {
     const document = makeDocument();
     const api = loadPageScript(qwenPageScript, document);
